@@ -88,7 +88,6 @@ lint = [
 ]
 test = [
   "coverage[toml]==7.14.0",
-  "pytest-cov==7.1.0",
   "pytest-rerunfailures==16.2",
   "pytest-xdist[psutil]==3.8.0",
   "pytest==9.0.3",
@@ -226,45 +225,38 @@ cache-keys = [
 trusted-publishing = "always"
 
 [tool.tox]
-env_list = ["style", "run", "3.14"]
+env_list = ["style", "run", "3.14", "cov"]
 requires = ["tox>=4"]
 
 [tool.tox.env_run_base]
 commands = [
   [
+    "coverage",
+    "run",
+    "-m",
     "pytest",
     "-v",
     "--tb=short",
+    "-n",
+    "0",
     "--basetemp={env_tmp_dir}",
-    "--cov",
-    "--cov-report=",
-    "--cov-fail-under=0",
     "-m",
     "smoke",
   ],
   [
+    "coverage",
+    "run",
+    "-m",
     "pytest",
     "-v",
     "--tb=short",
+    "-n",
+    "0",
     "--basetemp={env_tmp_dir}",
-    "--cov",
-    "--cov-append",
-    "--cov-report=",
-    "--cov-fail-under=0",
     "-m",
     "not smoke",
     { replace = "posargs", default = [
     ], extend = true },
-  ],
-  [
-    "coverage",
-    "report",
-  ],
-  [
-    "coverage",
-    "xml",
-    "-o",
-    "{toxworkdir}/coverage.{envname}.xml",
   ],
 ]
 constrain_package_deps = true
@@ -345,3 +337,25 @@ description = "Run Linters and Formatters"
 [tool.tox.env.run]
 commands = [["cobo", "version", { replace = "posargs", extend = true }]]
 description = "Run the application"
+
+[tool.tox.env.cov]
+base_python = ["3.14"]
+commands = [
+  [
+    "coverage",
+    "combine",
+  ],
+  [
+    "coverage",
+    "xml",
+  ],
+  [
+    "coverage",
+    "report",
+  ],
+]
+dependency_groups = ["test"]
+depends = ["3.14"]
+description = "Combine coverage data and emit XML/report"
+runner = "uv-venv-runner"
+skip_install = true

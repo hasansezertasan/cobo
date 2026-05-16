@@ -22,8 +22,6 @@ All types of contributions are encouraged and valued. See the [Table of Contents
   - [Your First Code Contribution](#your-first-code-contribution)
   - [Improving The Documentation](#improving-the-documentation)
 - [Styleguides](#styleguides)
-  - [Commit Messages](#commit-messages)
-- [Join The Project Team](#join-the-project-team)
 
 
 ## Code of Conduct
@@ -134,25 +132,33 @@ Enhancement suggestions are tracked as [GitHub issues](https://github.com/hasans
 <!-- You might want to create an issue template for enhancement suggestions that can be used as a guide and that defines the structure of the information to be included. If you do so, reference it here in the description. -->
 
 ### Your First Code Contribution
-<!-- TODO
-include Setup of env, IDE and typical getting started instructions?
 
--->
+Prerequisites: [`uv`](https://docs.astral.sh/uv/) for Python toolchain and dependency management.
+
+1. Fork and clone the repository.
+2. Install dependencies:
+   ```shell
+   uv sync
+   ```
+3. Run the test suite:
+   ```shell
+   uv run pytest
+   ```
+4. Run pre-commit hooks (uses [`prek`](https://github.com/j178/prek)):
+   ```shell
+   uv run prek run --all-files
+   ```
+5. Create a branch, commit, and open a pull request. See the [Styleguides](#styleguides) section below.
 
 ### Improving The Documentation
-<!-- TODO
-Updating, improving and correcting the documentation
 
--->
+Documentation lives in [`README.md`](https://github.com/hasansezertasan/cobo/blob/main/README.md). Fixes for typos, unclear wording, missing examples, or outdated instructions are welcome via pull request.
 
 ## Styleguides
-### Commit Messages
-<!-- TODO
 
--->
-
-## Join The Project Team
-<!-- TODO -->
+- **Commit messages** follow [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+- **Branch names** follow [Conventional Branch](https://conventional-branch.github.io/).
+- **Pull request titles** follow the [Conventional Pull Request action format](https://github.com/marketplace/actions/conventional-pull-request).
 
 <!-- omit in toc -->
 ## Attribution

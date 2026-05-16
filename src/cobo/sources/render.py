@@ -1,0 +1,114 @@
+"""Render boilerplates for stdout: dump and provenance header."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from cobo.sources.discover import find_boilerplate
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from cobo.config.schema import Source
+
+_SHORT_SHA_LEN = 7
+
+
+def dump(source: Source, clone_root: Path, names: list[str], commit_sha: str) -> str:
+    """Render one or more boilerplates from a source to a single string.
+
+    Args:
+        source: Resolved source.
+        clone_root: Path to the source's clone on disk.
+        names: One or more boilerplate names to render.
+        commit_sha: Full SHA of the clone's HEAD (used in headers).
+
+    Returns:
+        Concatenated content with optional headers. A single blank line
+        separates chunks; no trailing blank line is appended after the last.
+    """
+    chunks: list[str] = []
+    for name in names:
+        path = find_boilerplate(source, clone_root, name)
+        chunks.append(_render_one(source, path, commit_sha))
+    if len(chunks) == 1:
+        return chunks[0]
+    stripped = [c.rstrip("\n") for c in chunks]
+    return "\n\n".join(stripped) + "\n"
+
+
+def _render_one(source: Source, path: Path, commit_sha: str) -> str:
+    """Render a single boilerplate file (optionally with header).
+
+    Returns:
+        File content, optionally prefixed with a provenance header.
+    """
+    content = path.read_text(encoding="utf-8")
+    if not source.inject_header:
+        return content
+    header = build_header(
+        source=source,
+        boilerplate_filename=path.name,
+        commit_sha=commit_sha,
+    )
+    return f"{header}\n{content}"
+
+
+def build_header(source: Source, boilerplate_filename: str, commit_sha: str) -> str:
+    """Construct the provenance header for a boilerplate.
+
+    The URL line is omitted for non-GitHub sources, since the raw-URL scheme is
+    GitHub-specific.
+
+    Returns:
+        Multi-line string with source, file, commit, and (when applicable) URL.
+    """
+    short = commit_sha[:_SHORT_SHA_LEN]
+    raw_url = _raw_url(source.url, short, boilerplate_filename, source.subpath)
+    cp = source.comment_prefix
+    lines = [
+        f"{cp} Source: {source.name}",
+        f"{cp} File:   {boilerplate_filename}",
+        f"{cp} Commit: {short}",
+    ]
+    if raw_url is not None:
+        lines.append(f"{cp} URL:    {raw_url}")
+    return "\n".join(lines)
+
+
+_GITHUB_HTTPS_PREFIX = "https://github.com/"
+_GITHUB_SSH_PREFIX = "git@github.com:"
+
+
+def _raw_url(url: str, sha: str, filename: str, subpath: str) -> str | None:
+    """Build a raw.githubusercontent URL for a file at a given SHA.
+
+    Recognizes both HTTPS (``https://github.com/owner/repo``) and SSH
+    (``git@github.com:owner/repo.git``) forms.
+
+    Returns:
+        Raw GitHub URL, or None when the source URL is not a GitHub URL.
+    """
+    repo_path = _github_repo_path(url)
+    if repo_path is None:
+        return None
+    raw_root = f"https://raw.githubusercontent.com/{repo_path}"
+    if subpath:
+        return f"{raw_root}/{sha}/{subpath.strip('/')}/{filename}"
+    return f"{raw_root}/{sha}/{filename}"
+
+
+def _github_repo_path(url: str) -> str | None:
+    """Extract ``owner/repo`` from a GitHub HTTPS or SSH URL.
+
+    Returns:
+        ``owner/repo`` with any ``.git`` suffix stripped, or None when ``url``
+        is not a recognized GitHub URL.
+    """
+    if url.startswith(_GITHUB_HTTPS_PREFIX):
+        body = url[len(_GITHUB_HTTPS_PREFIX) :]
+    elif url.startswith(_GITHUB_SSH_PREFIX):
+        body = url[len(_GITHUB_SSH_PREFIX) :]
+    else:
+        return None
+    return body.removesuffix(".git").rstrip("/")

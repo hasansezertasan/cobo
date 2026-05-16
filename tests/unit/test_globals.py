@@ -1,0 +1,128 @@
+"""Tests for the global commands."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+import typer
+from typer.testing import CliRunner
+
+from cobo import globals as cobo_globals
+from cobo.config.schema import CoboConfig, Source
+from cobo.errors import GitError
+from cobo.globals import attach_globals
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+pytestmark = pytest.mark.unit
+
+runner = CliRunner()
+
+
+def make_config() -> CoboConfig:
+    """Build a minimal CoboConfig for tests.
+
+    Returns:
+        A CoboConfig with a single demo source.
+    """
+    return CoboConfig(
+        default_branch="main",
+        sources={
+            "demo": Source(name="demo", url="https://example.com", extension=".x"),
+        },
+    )
+
+
+def app_with_globals(tmp_path: Path) -> typer.Typer:
+    """Create a Typer app with global commands attached.
+
+    Returns:
+        A Typer app ready for CliRunner invocation.
+    """
+    parent = typer.Typer()
+    attach_globals(
+        parent,
+        config=make_config(),
+        cache_root=tmp_path,
+        user_config_file=tmp_path / "config.toml",
+    )
+    return parent
+
+
+def test_version_prints_package_version(tmp_path: Path) -> None:
+    """`cobo version` prints a version string."""
+    result = runner.invoke(app_with_globals(tmp_path), ["version"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip()
+
+
+def test_root_prints_cache_root(tmp_path: Path) -> None:
+    """`cobo root` prints the cache root path."""
+    result = runner.invoke(app_with_globals(tmp_path), ["root"])
+    assert result.exit_code == 0
+    assert str(tmp_path) in result.output
+
+
+def test_config_path_prints_user_config_path(tmp_path: Path) -> None:
+    """`cobo config-path` prints the user config file path."""
+    result = runner.invoke(app_with_globals(tmp_path), ["config-path"])
+    assert result.exit_code == 0
+    assert "config.toml" in result.output
+
+
+def test_list_sources_includes_configured_name(tmp_path: Path) -> None:
+    """`cobo list-sources` includes the configured source name."""
+    result = runner.invoke(app_with_globals(tmp_path), ["list-sources"])
+    assert result.exit_code == 0
+    assert "demo" in result.output
+
+
+def test_info_mentions_python_version(tmp_path: Path) -> None:
+    """`cobo info` includes Python version information."""
+    result = runner.invoke(app_with_globals(tmp_path), ["info"])
+    assert result.exit_code == 0
+    assert "Python" in result.output
+
+
+def test_config_prints_all_source_fields(tmp_path: Path) -> None:
+    """`cobo config` emits a TOML-ish block with every source field."""
+    result = runner.invoke(app_with_globals(tmp_path), ["config"])
+    assert result.exit_code == 0, result.output
+    assert "[sources.demo]" in result.output
+    assert 'url = "https://example.com"' in result.output
+    assert 'branch = "main"' in result.output
+    assert 'extension = ".x"' in result.output
+    assert "multi_dump = false" in result.output
+    assert "inject_header = " in result.output
+    assert "comment_prefix = " in result.output
+    assert "subpath = " in result.output
+
+
+def test_update_reports_ok_per_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo update` prints `<name>: ok` for each successful source."""
+    monkeypatch.setattr(cobo_globals, "clone_or_pull", lambda *_a, **_k: None)
+    result = runner.invoke(app_with_globals(tmp_path), ["update"])
+    assert result.exit_code == 0, result.output
+    assert "demo: ok" in result.output
+
+
+def test_update_exits_with_failure_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo update` exits with non-zero code equal to number of failed sources."""
+
+    def boom(*_a: object, **_k: object) -> None:
+        msg = "remote unreachable"
+        raise GitError(msg)
+
+    monkeypatch.setattr(cobo_globals, "clone_or_pull", boom)
+    result = runner.invoke(app_with_globals(tmp_path), ["update"])
+    assert result.exit_code == 1
+    assert "demo: failed" in result.output
+    assert "remote unreachable" in result.output

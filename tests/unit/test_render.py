@@ -1,0 +1,172 @@
+"""Tests for the dump renderer (pure string functions over fake repos)."""
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+from cobo.config.schema import Source
+from cobo.sources.render import build_header, dump
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+pytestmark = pytest.mark.unit
+
+
+def gitignore_source() -> Source:
+    """Build a gitignore-flavored Source (no header injection).
+
+    Returns:
+        A Source configured for gitignore files without header injection.
+    """
+    return Source(
+        name="gitignore",
+        url="https://github.com/github/gitignore",
+        extension=".gitignore",
+        multi_dump=True,
+        inject_header=False,
+    )
+
+
+def mise_source() -> Source:
+    """Build a mise-flavored Source (with header injection).
+
+    Returns:
+        A Source configured for mise TOML files with header injection.
+    """
+    return Source(
+        name="mise",
+        url="https://github.com/hasansezertasan/mise-cookbooks",
+        extension=".mise.toml",
+        multi_dump=False,
+        inject_header=True,
+        comment_prefix="#",
+    )
+
+
+def write_repo(tmp_path: Path, files: dict[str, str]) -> Path:
+    """Write files into tmp_path and return it.
+
+    Returns:
+        The tmp_path directory with files written.
+    """
+    for name, content in files.items():
+        (tmp_path / name).write_text(content, encoding="utf-8")
+    return tmp_path
+
+
+def test_single_dump_no_header_emits_raw_content(tmp_path: Path) -> None:
+    """A source with inject_header=False emits just the file content."""
+    repo = write_repo(tmp_path, {"Python.gitignore": "*.pyc\n__pycache__\n"})
+    out = dump(gitignore_source(), repo, ["Python"], commit_sha="abc1234")
+    assert out == "*.pyc\n__pycache__\n"
+
+
+def test_multi_dump_concatenates_with_blank_line_between(tmp_path: Path) -> None:
+    """Two files joined with one blank line between, single trailing newline."""
+    repo = write_repo(
+        tmp_path,
+        {
+            "Python.gitignore": "*.pyc\n",
+            "Node.gitignore": "node_modules/\n",
+        },
+    )
+    out = dump(gitignore_source(), repo, ["Python", "Node"], commit_sha="abc1234")
+    assert out == "*.pyc\n\nnode_modules/\n"
+
+
+def test_multi_dump_three_files_uses_only_inter_chunk_separators(
+    tmp_path: Path,
+) -> None:
+    """Three-file dump has N-1 blank-line separators, not N trailing blanks."""
+    repo = write_repo(
+        tmp_path,
+        {
+            "A.gitignore": "a\n",
+            "B.gitignore": "b\n",
+            "C.gitignore": "c\n",
+        },
+    )
+    out = dump(gitignore_source(), repo, ["A", "B", "C"], commit_sha="abc1234")
+    assert out == "a\n\nb\n\nc\n"
+
+
+def test_raw_url_for_ssh_form_github_url() -> None:
+    """SSH-style GitHub URLs (``git@github.com:owner/repo.git``) build raw URL."""
+    source = Source(
+        name="mise",
+        url="git@github.com:hasansezertasan/mise-cookbooks.git",
+        extension=".mise.toml",
+        inject_header=True,
+    )
+    header = build_header(
+        source=source,
+        boilerplate_filename="python.mise.toml",
+        commit_sha="abc1234",
+    )
+    expected = (
+        "https://raw.githubusercontent.com/hasansezertasan/"
+        "mise-cookbooks/abc1234/python.mise.toml"
+    )
+    assert expected in header
+
+
+def test_dump_with_header_prepends_provenance_lines(tmp_path: Path) -> None:
+    """A source with inject_header=True prefixes the file with a header block."""
+    repo = write_repo(tmp_path, {"python.mise.toml": 'min_version = "2024.9.5"\n'})
+    out = dump(mise_source(), repo, ["python"], commit_sha="deadbeefcafe")
+    assert "# Source: mise" in out
+    assert "# File:   python.mise.toml" in out
+    assert "# Commit: deadbee" in out
+    assert "min_version" in out
+
+
+def test_build_header_uses_short_sha_and_raw_url() -> None:
+    """The header builder constructs the four-line provenance block."""
+    header = build_header(
+        source=mise_source(),
+        boilerplate_filename="python.mise.toml",
+        commit_sha="0123456789abcdef",
+    )
+    assert header.startswith("# Source: mise")
+    assert "# File:   python.mise.toml" in header
+    assert "# Commit: 0123456" in header
+    assert "https://raw.githubusercontent.com/hasansezertasan/mise-cookbooks" in header
+
+
+def test_header_strips_git_suffix_from_url() -> None:
+    """A `.git` suffix on the source URL is stripped from the raw URL."""
+    source = Source(
+        name="mise",
+        url="https://github.com/hasansezertasan/mise-cookbooks.git",
+        extension=".mise.toml",
+        inject_header=True,
+    )
+    header = build_header(
+        source=source,
+        boilerplate_filename="x.mise.toml",
+        commit_sha="abc1234",
+    )
+    expected = (
+        "https://raw.githubusercontent.com/hasansezertasan/"
+        "mise-cookbooks/abc1234/x.mise.toml"
+    )
+    assert expected in header
+    assert ".git/" not in header
+
+
+def test_header_omits_url_for_non_github_source() -> None:
+    """Non-GitHub URLs skip the URL line entirely (no mangled host)."""
+    source = Source(
+        name="custom",
+        url="https://gitlab.example.com/team/templates",
+        extension=".tpl",
+        inject_header=True,
+    )
+    header = build_header(
+        source=source,
+        boilerplate_filename="x.tpl",
+        commit_sha="abc1234",
+    )
+    assert "URL:" not in header
+    assert "gitlab.example.com" not in header

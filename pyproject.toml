@@ -1,0 +1,347 @@
+[project]
+name = "cobo"
+description = "cobo (copy boilerplates) is a generic CLI for fetching boilerplate files from configurable git repositories"
+license = "MIT"
+readme = "README.md"
+dynamic = ["version"]
+authors = [{ name = "Hasan Sezer Taşan", email = "hasansezertasan@gmail.com" }]
+maintainers = [
+  { name = "Hasan Sezer Taşan", email = "hasansezertasan@gmail.com" },
+]
+keywords = [
+  "boilerplate",
+  "cli",
+  "command-line",
+  "config-file",
+  "cookbook",
+  "developer-tools",
+  "gitignore",
+  "mise",
+  "scaffold",
+  "setup",
+  "template",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Topic :: Software Development",
+  "Topic :: System :: Installation/Setup",
+  "Topic :: System :: Software Distribution",
+  "Topic :: System :: Systems Administration",
+  "Topic :: Utilities",
+  "Typing :: Typed",
+]
+requires-python = ">=3.14"
+dependencies = [
+  "gitpython==3.1.50",
+  "platformdirs==4.9.6",
+  "rich==15.0.0",
+  "typer==0.25.1",
+]
+
+[project.urls]
+changelog = "https://github.com/hasansezertasan/cobo/blob/main/CHANGELOG.md"
+documentation = "https://github.com/hasansezertasan/cobo#readme"
+homepage = "https://github.com/hasansezertasan/cobo"
+issues = "https://github.com/hasansezertasan/cobo/issues"
+releasenotes = "https://github.com/hasansezertasan/cobo/releases"
+source = "https://github.com/hasansezertasan/cobo.git"
+
+[project.scripts]
+cobo = "cobo.cli:app"
+
+[dependency-groups]
+dev = [
+  "prek>=0.3.0",
+  "tox-uv>=1.35.2",
+  "tox>=4.54.0",
+  { include-group = "lint" },
+  { include-group = "test" },
+]
+lint = [
+  "actionlint-py==1.7.12.24",
+  "google-yamlfmt==0.21.0",
+  "mypy==2.1.0",
+  "pyrefly==1.0.0",
+  "pyright==1.1.409",
+  "ruff==0.15.13",
+  "slotscheck==0.19.1",
+  "taplo==0.9.3",
+  "ty==0.0.37",
+  "typos==1.46.1",
+  "validate-pyproject[all]==0.25",
+  "vulture==2.16",
+
+]
+test = [
+  "coverage[toml]==7.14.0",
+  "pytest-cov==7.1.0",
+  "pytest-rerunfailures==16.2",
+  "pytest-xdist[psutil]==3.8.0",
+  "pytest==9.0.3",
+]
+
+[build-system]
+requires = ["hatch-vcs", "hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.1.0"
+
+[tool.hatch.version.raw-options]
+version_scheme = "only-version"
+local_scheme = "no-local-version"
+
+[tool.hatch.build]
+hooks.vcs.version-file = "src/cobo/_version.py"
+
+[tool.coverage.run]
+source_pkgs = ["cobo", "tests"]
+branch = true
+parallel = true
+omit = ["*/cobo/_version.py", "*/cobo/__main__.py"]
+
+[tool.coverage.paths]
+cobo = ["src/cobo", "*/cobo/src/cobo", "*/site-packages/cobo"]
+tests = ["tests", "*/cobo/tests"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+
+[tool.pytest.ini_options]
+addopts = "-v --tb=short -n auto --reruns 2 --reruns-delay 1"
+testpaths = ["tests"]
+markers = [
+  "unit: pure logic tests with no external I/O beyond tmp_path",
+  "integration: cross-module tests using real subprocess (git) on local fixtures",
+  "e2e: full CLI invocation tests through the assembled Typer app",
+  "smoke: fast sanity checks that exercise critical paths end-to-end",
+]
+
+[tool.mypy]
+files = ["src"]
+pretty = true
+python_version = "3.14"
+show_error_codes = true
+strict = true
+
+[tool.pyrefly]
+python-version = "3.14"
+project-includes = ["src"]
+
+[tool.pyright]
+include = ["src/cobo"]
+
+[tool.ruff]
+fix = true
+preview = true
+show-fixes = true
+src = ["src", "tests"]
+target-version = "py314"
+unsafe-fixes = true
+
+[tool.ruff.analyze]
+detect-string-imports = true
+preview = true
+
+[tool.ruff.format]
+docstring-code-format = true
+line-ending = "lf"
+preview = true
+
+[tool.ruff.lint]
+ignore = ["COM812", "CPY", "D203", "D213", "FIX", "TD"]
+fixable = ["ALL"]
+preview = true
+select = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101"]
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
+
+[tool.ruff.lint.pycodestyle]
+ignore-overlong-task-comments = true
+
+[tool.ruff.lint.flake8-copyright]
+author = "Hasan Sezer Taşan <hasansezertasan@gmail.com>"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.ruff]
+parenthesize-tuple-in-subscript = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 5
+
+[tool.ty.src]
+include = ["src"]
+respect-ignore-files = false
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.slotscheck]
+strict-imports = false
+
+[tool.typos.default.extend-words]
+# CPY is a valid ruff rule code prefix (copyright); not a misspelling of COPY/CPU
+CPY = "CPY"
+
+[tool.vulture]
+ignore_decorators = ["@app.command", "@sub.command"]
+ignore_names = ["pytestmark"]
+min_confidence = 60
+paths = ["src", "tests"]
+
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
+trusted-publishing = "always"
+
+[tool.tox]
+env_list = ["style", "run", "3.14"]
+requires = ["tox>=4"]
+
+[tool.tox.env_run_base]
+commands = [
+  [
+    "pytest",
+    "-v",
+    "--tb=short",
+    "--basetemp={env_tmp_dir}",
+    "--cov",
+    "--cov-report=",
+    "--cov-fail-under=0",
+    "-m",
+    "smoke",
+  ],
+  [
+    "pytest",
+    "-v",
+    "--tb=short",
+    "--basetemp={env_tmp_dir}",
+    "--cov",
+    "--cov-append",
+    "--cov-report=",
+    "--cov-fail-under=0",
+    "-m",
+    "not smoke",
+    { replace = "posargs", default = [
+    ], extend = true },
+  ],
+  [
+    "coverage",
+    "report",
+  ],
+  [
+    "coverage",
+    "xml",
+    "-o",
+    "{toxworkdir}/coverage.{envname}.xml",
+  ],
+]
+constrain_package_deps = true
+dependency_groups = ["test"]
+description = "Run the tests under {base_python}"
+env_tmp_dir = "{toxworkdir}/tmp/{envname}"
+package = "wheel"
+runner = "uv-venv-runner"
+use_frozen_constraints = true
+wheel_build_env = ".pkg"
+
+[tool.tox.env.style]
+base_python = ["3.14"]
+commands = [
+  [
+    "ruff",
+    "check",
+  ],
+  [
+    "ruff",
+    "format",
+  ],
+  [
+    "mypy",
+  ],
+  [
+    "pyright",
+  ],
+  [
+    "ty",
+    "check",
+  ],
+  [
+    "pyrefly",
+    "check",
+  ],
+  [
+    "vulture",
+  ],
+  [
+    "slotscheck",
+    "-m",
+    "cobo",
+  ],
+  [
+    "taplo",
+    "lint",
+  ],
+  [
+    "taplo",
+    "format",
+  ],
+  [
+    "validate-pyproject",
+    "pyproject.toml",
+  ],
+  [
+    "typos",
+    "--diff",
+  ],
+  [
+    "actionlint",
+  ],
+  [
+    "yamlfmt",
+    "-lint",
+    ".",
+  ],
+  [
+    "yamlfmt",
+    ".",
+  ],
+]
+runner = "uv-venv-runner"
+dependency_groups = ["lint"]
+description = "Run Linters and Formatters"
+
+[tool.tox.env.run]
+commands = [["cobo", "version", { replace = "posargs", extend = true }]]
+description = "Run the application"

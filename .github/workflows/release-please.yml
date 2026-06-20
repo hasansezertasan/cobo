@@ -71,13 +71,19 @@ jobs:
             exit 0
           fi
           sha="$(gh api "repos/$REPO/contents/uv.lock?ref=$BRANCH" --jq .sha)"
-          gh api "repos/$REPO/contents/uv.lock" \
-            --method PUT \
-            --field message="chore: sync uv.lock with release version" \
-            --field branch="$BRANCH" \
-            --field sha="$sha" \
-            --field content="$(base64 -w0 uv.lock)" \
-            --silent
+          # Build the request body with jq and send it via --input. The base64
+          # lockfile (~145 KB) must not be passed as a CLI argument or it blows
+          # past ARG_MAX ("Argument list too long"); --rawfile and --input keep
+          # it entirely off the command line.
+          base64 -w0 uv.lock > content.b64
+          jq -n \
+            --arg message "chore: sync uv.lock with release version" \
+            --arg branch "$BRANCH" \
+            --arg sha "$sha" \
+            --rawfile content content.b64 \
+            '{message: $message, branch: $branch, sha: $sha, content: $content}' \
+            | gh api "repos/$REPO/contents/uv.lock" --method PUT --input - --silent
+          rm -f content.b64
   publish:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}

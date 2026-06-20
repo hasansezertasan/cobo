@@ -87,7 +87,7 @@ lint = [
 
 ]
 test = [
-  "coverage[toml]==7.14.0",
+  "coverage[toml]==7.14.1",
   "pytest-rerunfailures==16.2",
   "pytest-xdist[psutil]==3.8.0",
   "pytest==9.0.3",

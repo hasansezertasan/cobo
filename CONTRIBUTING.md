@@ -156,7 +156,7 @@ Documentation lives in [`README.md`](https://github.com/hasansezertasan/cobo/blo
 
 ## Styleguides
 
-- **Commit messages** follow [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+- **Commit messages** follow [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). They are the source of truth for releases: [release-please](https://github.com/googleapis/release-please) parses them on every push to `main` and maintains a "Release PR" with the computed version bump and `CHANGELOG.md`. Merging that PR cuts the git tag and a draft GitHub release, after which CI builds, publishes to PyPI via Trusted Publishing, and un-drafts the release. release-please owns the version: it rewrites `version` in `pyproject.toml` (via the `x-release-please-version` marker) and `__version__` in `src/cobo/__init__.py`, so the version is never hand-edited.
 - **Branch names** follow [Conventional Branch](https://conventional-branch.github.io/).
 - **Pull request titles** follow the [Conventional Pull Request action format](https://github.com/marketplace/actions/conventional-pull-request).
 

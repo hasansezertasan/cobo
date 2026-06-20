@@ -82,6 +82,7 @@ wheels = [
 
 [[package]]
 name = "cobo"
+version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "gitpython" },

@@ -54,17 +54,30 @@ jobs:
             uv.lock
       - name: Sync the lockfile to the bumped version
         run: uv lock
-      - name: Commit and push if the lockfile changed
+      - name: Commit the lockfile via the API if it changed
+        # Commit through the GitHub Contents API rather than `git push`. A push
+        # authenticated with the default GITHUB_TOKEN is suppressed by GitHub's
+        # loop-prevention and would NOT re-trigger CI, leaving the corrected
+        # lockfile unverified. An API-authored commit (the same mechanism
+        # release-please uses) does trigger the pull_request checks, with no PAT
+        # or extra secret required.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
         run: |
           if git diff --quiet -- uv.lock; then
             echo "uv.lock already in sync; nothing to commit."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uv.lock
-          git commit -m "chore: sync uv.lock with release version"
-          git push
+          sha="$(gh api "repos/$REPO/contents/uv.lock?ref=$BRANCH" --jq .sha)"
+          gh api "repos/$REPO/contents/uv.lock" \
+            --method PUT \
+            --field message="chore: sync uv.lock with release version" \
+            --field branch="$BRANCH" \
+            --field sha="$sha" \
+            --field content="$(base64 -w0 uv.lock)" \
+            --silent
   publish:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}

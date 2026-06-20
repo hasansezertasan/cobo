@@ -3,7 +3,7 @@ name = "cobo"
 description = "cobo (copy boilerplates) is a generic CLI for fetching boilerplate files from configurable git repositories"
 license = "MIT"
 readme = "README.md"
-dynamic = ["version"]
+version = "0.0.0" # x-release-please-version
 authors = [{ name = "Hasan Sezer Taşan", email = "hasansezertasan@gmail.com" }]
 maintainers = [
   { name = "Hasan Sezer Taşan", email = "hasansezertasan@gmail.com" },
@@ -94,25 +94,14 @@ test = [
 ]
 
 [build-system]
-requires = ["hatch-vcs", "hatchling"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "vcs"
-fallback-version = "0.1.0"
-
-[tool.hatch.version.raw-options]
-version_scheme = "only-version"
-local_scheme = "no-local-version"
-
-[tool.hatch.build]
-hooks.vcs.version-file = "src/cobo/_version.py"
 
 [tool.coverage.run]
 source_pkgs = ["cobo", "tests"]
 branch = true
 parallel = true
-omit = ["*/cobo/_version.py", "*/cobo/__main__.py"]
+omit = ["*/cobo/__main__.py"]
 
 [tool.coverage.paths]
 cobo = ["src/cobo", "*/cobo/src/cobo", "*/site-packages/cobo"]

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import platform
-from importlib.metadata import version as get_version
 from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from cobo import __version__
 from cobo.errors import GitError
 from cobo.paths import source_clone_root
 from cobo.sources.repo import clone_or_pull
@@ -49,14 +49,14 @@ def _register_version(app: typer.Typer) -> None:
     @app.command()
     def version() -> None:
         """Print the cobo package version."""
-        typer.echo(get_version("cobo"))
+        typer.echo(__version__)
 
 
 def _register_info(app: typer.Typer, *, config: CoboConfig, cache_root: Path) -> None:
     @app.command()
     def info() -> None:
         """Print application metadata."""
-        typer.echo(f"Application Version: {get_version('cobo')}")
+        typer.echo(f"Application Version: {__version__}")
         py_ver = platform.python_version()
         py_impl = platform.python_implementation()
         typer.echo(f"Python Version: {py_ver} ({py_impl})")

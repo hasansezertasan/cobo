@@ -16,6 +16,8 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - name: Release Please
         id: release
@@ -23,6 +25,46 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+  sync-lockfile:
+    # release-please bumps the version in pyproject.toml but not in uv.lock,
+    # which leaves the editable "cobo" entry stale and breaks every
+    # `uv run --locked` job on the release PR. Regenerate the lockfile on the
+    # release branch so it stays in sync.
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    runs-on: ubuntu-latest
+    name: Sync uv.lock on release PR
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the release PR branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version-file: ".python-version"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Sync the lockfile to the bumped version
+        run: uv lock
+      - name: Commit and push if the lockfile changed
+        run: |
+          if git diff --quiet -- uv.lock; then
+            echo "uv.lock already in sync; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: sync uv.lock with release version"
+          git push
   publish:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}

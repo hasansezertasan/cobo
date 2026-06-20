@@ -90,10 +90,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Publish to PyPI
     permissions:
-      id-token: write       # IMPORTANT: Mandatory for PyPI Trusted Publishing
-      contents: write       # IMPORTANT: Mandatory to upload to and un-draft the release
+      id-token: write  # IMPORTANT: Mandatory for PyPI Trusted Publishing
+      contents: write  # IMPORTANT: Mandatory to upload to and un-draft the release
       pull-requests: write  # IMPORTANT: Mandatory to close the phantom release PR
-      actions: write        # IMPORTANT: Mandatory to re-dispatch the workflow below
+      actions: write  # IMPORTANT: Mandatory to re-dispatch the workflow below
     environment:
       name: publish
       url: https://pypi.org/project/cobo/${{ needs.release-please.outputs.version }}

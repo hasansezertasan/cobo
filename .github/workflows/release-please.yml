@@ -90,8 +90,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Publish to PyPI
     permissions:
-      id-token: write  # IMPORTANT: Mandatory for PyPI Trusted Publishing
-      contents: write  # IMPORTANT: Mandatory to upload to and un-draft the release
+      id-token: write       # IMPORTANT: Mandatory for PyPI Trusted Publishing
+      contents: write       # IMPORTANT: Mandatory to upload to and un-draft the release
+      pull-requests: write  # IMPORTANT: Mandatory to close the phantom release PR
+      actions: write        # IMPORTANT: Mandatory to re-dispatch the workflow below
     environment:
       name: publish
       url: https://pypi.org/project/cobo/${{ needs.release-please.outputs.version }}
@@ -122,3 +124,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false
+      - name: Reconcile the next release PR against the now-published release
+        # release-please derives its commit range from the latest *published*
+        # GitHub Release and ignores drafts. The release-please job above opened
+        # the next release PR in this same run, while this release was still a
+        # draft, so that PR was computed with no baseline and re-lists every
+        # already-shipped commit as a phantom version bump. release-please will
+        # NOT clean that up on its own: when a later run finds no new commits it
+        # just skips, leaving the orphan PR open. So close it here now that the
+        # release is published, then re-dispatch the workflow. The re-dispatch
+        # sees the published release and recreates a CORRECT next PR only if real
+        # unreleased commits exist; otherwise it finds nothing and stops without
+        # reaching this job again, so the re-trigger is bounded to one run.
+        # (workflow_dispatch is the documented exception to GITHUB_TOKEN
+        # loop-prevention, so no PAT is required.)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr="$(gh pr list --state open \
+            --head release-please--branches--${{ github.ref_name }} \
+            --json number --jq '.[0].number // empty')"
+          if [ -n "$pr" ]; then
+            echo "Closing phantom release PR #$pr"
+            gh pr close "$pr" --delete-branch
+          fi
+          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref_name }}"

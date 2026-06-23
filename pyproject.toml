@@ -3,7 +3,7 @@ name = "cobo"
 description = "cobo (copy boilerplates) is a generic CLI for fetching boilerplate files from configurable git repositories"
 license = "MIT"
 readme = "README.md"
-version = "0.1.0" # x-release-please-version
+version = "0.2.0" # x-release-please-version
 authors = [{ name = "Hasan Sezer Taşan", email = "hasansezertasan@gmail.com" }]
 maintainers = [
   { name = "Hasan Sezer Taşan", email = "hasansezertasan@gmail.com" },

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/hasansezertasan/cobo/compare/v0.2.0...v0.2.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **deps:** update dependency platformdirs to v4.10.0 ([#33](https://github.com/hasansezertasan/cobo/issues/33)) ([516bb14](https://github.com/hasansezertasan/cobo/commit/516bb14d683fceff0d1282a2036fa72e83345227))
+
 ## [0.2.0](https://github.com/hasansezertasan/cobo/compare/v0.1.0...v0.2.0) (2026-06-23)
 
 

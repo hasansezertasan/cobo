@@ -44,7 +44,9 @@ jobs:
         with:
           # hatch-vcs derives the version from the git tag, so the build needs
           # full history and tags. fetch-depth: 0 fetches everything, including
-          # the release tag created by release-please for this run.
+          # the release tag, which `force-tag-creation` in the release-please
+          # config makes release-please create immediately — GitHub otherwise
+          # withholds the tag for a draft release until it is published.
           fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0

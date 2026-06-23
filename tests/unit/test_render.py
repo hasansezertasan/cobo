@@ -47,13 +47,16 @@ def mise_source() -> Source:
 
 
 def write_repo(tmp_path: Path, files: dict[str, str]) -> Path:
-    """Write files into tmp_path and return it.
+    r"""Write files into tmp_path and return it.
+
+    Writes bytes (not ``write_text``) so platform newline translation never
+    rewrites ``\\n`` to ``\\r\\n`` on Windows, keeping on-disk content exact.
 
     Returns:
         The tmp_path directory with files written.
     """
     for name, content in files.items():
-        (tmp_path / name).write_text(content, encoding="utf-8")
+        (tmp_path / name).write_bytes(content.encode("utf-8"))
     return tmp_path
 
 

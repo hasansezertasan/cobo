@@ -311,11 +311,15 @@ commands = [
   ],
   [
     "yamlfmt",
+    "-conf",
+    ".github/yamlfmt.yml",
     "-lint",
     ".",
   ],
   [
     "yamlfmt",
+    "-conf",
+    ".github/yamlfmt.yml",
     ".",
   ],
 ]

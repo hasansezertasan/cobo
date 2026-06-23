@@ -1,5 +1,5 @@
 """cobo — copy boilerplates from configurable git repositories."""
 
-__version__ = "0.2.0"
+from cobo._version import __version__
 
 __all__ = ["__version__"]

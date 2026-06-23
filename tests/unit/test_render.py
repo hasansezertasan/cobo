@@ -5,12 +5,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cobo.config.schema import Source
-from cobo.sources.render import _COBO_URL, build_header, dump
+from cobo.sources.render import build_header, dump
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
+
+_COBO_URL = "https://github.com/hasansezertasan/cobo"
 
 
 def gitignore_source() -> Source:

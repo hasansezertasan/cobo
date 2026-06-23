@@ -93,6 +93,19 @@ def test_multi_dump_three_files_uses_only_inter_chunk_separators(
     assert out == "a\n\nb\n\nc\n"
 
 
+def test_dump_preserves_embedded_carriage_returns(tmp_path: Path) -> None:
+    r"""Embedded ``\\r`` bytes survive a dump (no universal-newline collapse).
+
+    The macOS gitignore uses ``Icon[\\r]`` as a character class matching a lone
+    carriage return; reading via ``read_text`` would corrupt it to ``Icon[\\n]``.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "macOS.gitignore").write_bytes(b"Icon[\r]\n")
+    out = dump(gitignore_source(), repo, ["macOS"], commit_sha="abc1234")
+    assert out == "Icon[\r]\n"
+
+
 def test_raw_url_for_ssh_form_github_url() -> None:
     """SSH-style GitHub URLs (``git@github.com:owner/repo.git``) build raw URL."""
     source = Source(

@@ -45,7 +45,10 @@ def _render_one(source: Source, path: Path, commit_sha: str) -> str:
     Returns:
         File content, optionally prefixed with a provenance header.
     """
-    content = path.read_text(encoding="utf-8")
+    # Decode bytes directly rather than ``read_text`` to avoid universal-newline
+    # translation, which would collapse embedded ``\r`` bytes (e.g. the macOS
+    # gitignore ``Icon[\r]`` character-class trick) to ``\n`` and corrupt them.
+    content = path.read_bytes().decode("utf-8")
     if not source.inject_header:
         return content
     header = build_header(

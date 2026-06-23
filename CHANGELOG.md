@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/hasansezertasan/cobo/compare/v0.1.0...v0.2.0) (2026-06-23)
+
+
+### Features
+
+* **render:** lead provenance header with cobo attribution line ([#40](https://github.com/hasansezertasan/cobo/issues/40)) ([a77fb12](https://github.com/hasansezertasan/cobo/commit/a77fb1298ba0abdeac10d315d17528a923bffb88))
+
+
+### Bug Fixes
+
+* **ci:** close phantom release-please PR opened during the draft window ([#19](https://github.com/hasansezertasan/cobo/issues/19)) ([7fa2378](https://github.com/hasansezertasan/cobo/commit/7fa2378a02b6d760c59a3b3f5bbb78375ab0b021))
+* **deps:** update dependency typer to v0.26.7 ([#34](https://github.com/hasansezertasan/cobo/issues/34)) ([dde2104](https://github.com/hasansezertasan/cobo/commit/dde21042ecf46f0ae7bddf2501bb99ccd953ab30))
+
 ## 0.1.0 (2026-06-20)
 
 

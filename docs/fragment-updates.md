@@ -7,10 +7,10 @@ Renovate: pin a version, detect drift, open a PR.
 ## Overview
 
 When you dump a boilerplate with `--lock`, cobo writes (or updates) a `cobo.lock`
-file next to your output file. The lockfile records which source file was rendered
-and a content-addressed blob SHA. Later, `cobo check` compares the stored blobs
-against the current upstream blobs and reports any that have drifted. `cobo sync`
-re-renders and re-pins the outdated fragments in one step.
+file. The lockfile records which source file was rendered and a content-addressed
+blob SHA. Later, `cobo check` compares the stored blobs against the current
+upstream blobs and reports any that have drifted. `cobo sync` re-renders and
+re-pins the outdated fragments in one step.
 
 ---
 
@@ -24,7 +24,11 @@ cobo gitignore dump Python Node --out .gitignore --lock
 ```
 
 cobo renders `.gitignore` from the `Python` and `Node` templates, writes it, and
-creates or updates `cobo.lock` in the current directory.
+creates or updates `cobo.lock`. The lockfile location is determined by walking up
+from the current working directory for the nearest existing `cobo.lock`; if none
+is found, `cobo.lock` is created in the current working directory (not necessarily
+beside the `--out` file). Fragment output paths in the lockfile are stored relative
+to the lockfile's directory.
 
 > `--lock` requires `--out`. Using `--lock` without `--out` exits with code 2 and
 > prints an error — there is no path to track when writing to stdout.
@@ -140,6 +144,11 @@ Emits JSON to stdout:
 | `0` | All tracked fragments are up to date. |
 | `1` | One or more fragments have updates available. |
 | `2` | No `cobo.lock` found. Run `cobo <source> dump --lock` first. |
+
+> Fragments that cannot be evaluated (e.g. their `source` is not configured) are
+> reported with an `error` status but are **not** counted as outdated — so `cobo
+> check` can exit 0 while `error` entries are still present in the output. Always
+> inspect the table (or `--json`) for `error` entries even on a clean exit.
 
 ---
 

@@ -154,7 +154,9 @@ the same Dependabot/Renovate pattern applied to boilerplates.
 cobo gitignore dump Python Node --out .gitignore --lock
 ```
 
-`--lock` writes a `cobo.lock` file alongside the output. Re-run after
+`--lock` writes a `cobo.lock` file: cobo walks up from the current working
+directory for the nearest existing `cobo.lock` and updates it, or creates one
+in the current working directory if none is found. Re-run after
 `cobo gitignore update` to refresh the pin. (`--lock` requires `--out`.)
 
 **Check for drift:**

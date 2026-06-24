@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from cobo.commands.record import record_dump, resolve_lock_path
 from cobo.config.schema import Source
 from cobo.errors import GitError, UserError
 from cobo.sources.discover import list_boilerplates, search_boilerplates
@@ -92,31 +93,55 @@ def _register_search(
             typer.echo(name)
 
 
-def _register_dump(
+def _register_dump(  # noqa: C901
     sub: typer.Typer,
     source: Source,
     clone_root_provider: CloneRootProvider,
 ) -> None:
     @sub.command("dump")
-    def dump_cmd(
+    def dump_cmd(  # noqa: C901
         names: list[str] = typer.Argument(..., help="Boilerplate name(s) to dump."),  # noqa: B008
+        out: Path | None = typer.Option(  # noqa: B008
+            None, "--out", help="Write output to this file instead of stdout."
+        ),
+        lock: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--lock",
+            help="Record this dump in cobo.lock (requires --out).",
+        ),
     ) -> None:
-        """Dump one (or several, if multi_dump=true) boilerplate(s) to stdout.
+        """Dump boilerplate(s) to stdout or a file, optionally recording in the lock.
 
         Raises:
-            Exit: With code 1 if the boilerplate name is not found or multi-dump
-                is rejected.
+            Exit: Code 1 if a name is not found or multi-dump is rejected;
+                code 2 if --lock is used without --out.
         """
         target = clone_root_provider(source)
         if not target.exists():
             _missing(source)
         _enforce_multi_dump(source, names)
+        if lock and out is None:
+            typer.echo("--lock requires --out (a file path to track).", err=True)
+            raise typer.Exit(2)
+        commit_sha = current_commit_sha(target)
         try:
-            content = render_dump(source, target, names, current_commit_sha(target))
+            content = render_dump(source, target, names, commit_sha)
         except UserError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(1) from exc
-        typer.echo(content, nl=False)
+        if out is None:
+            typer.echo(content, nl=False)
+            return
+        out.write_bytes(content.encode("utf-8"))
+        if lock:
+            record_dump(
+                source=source,
+                clone_root=target,
+                names=names,
+                out_path=out,
+                lock_path=resolve_lock_path(Path.cwd()),
+                commit_sha=commit_sha,
+            )
 
 
 def _register_root(

@@ -33,6 +33,46 @@ def dump(source: Source, clone_root: Path, names: list[str], commit_sha: str) ->
         path = find_boilerplate(source, clone_root, name)
         repo_rel = path.relative_to(clone_root).as_posix()
         chunks.append(_render_one(source, path, repo_rel, commit_sha))
+    return _concat(chunks)
+
+
+def dump_locked(
+    source: Source, clone_root: Path, repo_rel_paths: list[str], commit_sha: str
+) -> str:
+    """Render fixed repo-relative paths (the files a lockfile already tracks).
+
+    Unlike :func:`dump`, this does NOT re-resolve names via ``find_boilerplate``
+    — it renders exactly the paths recorded in the lock, so ``cobo sync`` always
+    re-renders the same upstream file it is tracking even if another same-stem
+    file would now be preferred.
+
+    Args:
+        source: Resolved source.
+        clone_root: Path to the source's clone on disk.
+        repo_rel_paths: Repo-relative POSIX paths to render, in order.
+        commit_sha: Full SHA of the clone's HEAD (used in headers).
+
+    Returns:
+        Concatenated content with optional headers, matching ``dump``'s layout.
+
+    Note:
+        Propagates ``OSError`` when a path does not exist in the clone
+        (e.g. removed upstream). This drives per-fragment failure isolation
+        in ``cobo sync``.
+    """
+    chunks = [
+        _render_one(source, clone_root / repo_rel, repo_rel, commit_sha)
+        for repo_rel in repo_rel_paths
+    ]
+    return _concat(chunks)
+
+
+def _concat(chunks: list[str]) -> str:
+    """Join rendered chunks with a single blank line, one trailing newline.
+
+    Returns:
+        The single chunk unchanged, or chunks joined by one blank line.
+    """
     if len(chunks) == 1:
         return chunks[0]
     stripped = [c.rstrip("\n") for c in chunks]

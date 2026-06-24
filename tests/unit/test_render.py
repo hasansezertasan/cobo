@@ -199,3 +199,26 @@ def test_header_stem_without_matching_extension() -> None:
     )
     header = build_header(source=source, repo_rel_path="text/MIT", commit_sha="a" * 40)
     assert "licenses/MIT@" in header
+
+
+# ---------------------------------------------------------------------------
+# dump_locked tests
+# ---------------------------------------------------------------------------
+
+from cobo.sources.render import dump_locked  # noqa: E402
+
+
+def test_dump_locked_renders_exact_path(tmp_path: Path) -> None:
+    """dump_locked renders the given repo path, not a name-resolved match."""
+    repo = write_repo(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    (repo / "sub").mkdir()
+    (repo / "sub" / "Python.gitignore").write_bytes(b"NESTED\n")
+    out = dump_locked(gitignore_source(), repo, ["sub/Python.gitignore"], "a" * 40)
+    assert out == "NESTED\n"
+
+
+def test_dump_locked_missing_path_raises_oserror(tmp_path: Path) -> None:
+    """A path absent from the clone raises OSError (drives sync failure isolation)."""
+    repo = write_repo(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    with pytest.raises(OSError):  # noqa: PT011
+        dump_locked(gitignore_source(), repo, ["Nope.gitignore"], "a" * 40)

@@ -104,11 +104,11 @@ def test_sync_missing_lock_exits_2(
     assert result.exit_code == _EXIT_NO_LOCK, result.output
 
 
-def test_sync_dry_run_unknown_source_is_noop(
+def test_sync_unknown_source_exits_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`cobo sync --dry-run` over an unknown-source lock changes nothing (exit 0)."""
+    """`cobo sync` over an unknown-source lock reports failure (exit 1)."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "cobo.lock").write_text(_LOCK_UNKNOWN_SOURCE, encoding="utf-8")
     result = runner.invoke(app, ["sync", "--dry-run"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output

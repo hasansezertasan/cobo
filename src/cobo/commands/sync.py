@@ -9,7 +9,7 @@ from cobo.commands.check import run_check
 from cobo.errors import CoboError
 from cobo.lock.io import write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
-from cobo.sources.render import dump as render_dump
+from cobo.sources.render import dump_locked as render_dump_locked
 from cobo.sources.repo import blob_sha_for_path, current_commit_sha
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class SyncResult:
     check: CheckResult
 
 
-def run_sync(  # noqa: PLR0913
+def run_sync(  # noqa: C901,PLR0913
     lock: Lockfile,
     sources: Mapping[str, Source],
     clone_root_provider: CloneRootProvider,
@@ -64,6 +64,10 @@ def run_sync(  # noqa: PLR0913
     failed: list[str] = []
     new_fragments: list[Fragment] = []
     for frag, report in zip(lock.fragments, result.reports, strict=True):
+        if report.error is not None:
+            failed.append(frag.path)
+            new_fragments.append(frag)
+            continue
         if not report.outdated:
             new_fragments.append(frag)
             continue
@@ -75,7 +79,7 @@ def run_sync(  # noqa: PLR0913
                 lock_dir,
                 dry_run=dry_run,
             )
-        except CoboError:
+        except CoboError, OSError:
             failed.append(frag.path)
             new_fragments.append(frag)
             continue
@@ -99,16 +103,17 @@ def _rerender(
 ) -> Fragment:
     """Re-render one fragment's output and return its advanced lock entry.
 
-    Propagates ``CoboError`` from ``render_dump`` or ``blob_sha_for_path``
-    when a file has been removed upstream or the clone is unreadable.
+    Propagates ``CoboError`` or ``OSError`` from ``render_dump_locked``,
+    ``blob_sha_for_path``, or the file write when a file has been removed
+    upstream, the clone is unreadable, or the output path is unwritable.
 
     Returns:
         The fragment with each file's commit/blob refreshed to the clone HEAD.
     """
     clone_root = clone_root_provider(source)
     commit = current_commit_sha(clone_root)
-    names = [f.name for f in frag.files]
-    content = render_dump(source, clone_root, names, commit)
+    repo_rel_paths = [f.path for f in frag.files]
+    content = render_dump_locked(source, clone_root, repo_rel_paths, commit)
     if not dry_run:
         (lock_dir / frag.path).write_bytes(content.encode("utf-8"))
     new_files = tuple(

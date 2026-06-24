@@ -105,6 +105,19 @@ def test_upsert_appends_new_path() -> None:
     assert {f.path for f in lock.fragments} == {".gitignore", "mise.toml"}
 
 
+def test_read_rejects_fragment_missing_required_key(tmp_path: Path) -> None:
+    """A fragment file entry missing a required key raises ConfigError."""
+    target = tmp_path / LOCK_FILENAME
+    target.write_text(
+        'version = 1\n\n[[fragment]]\npath = ".gitignore"\nsource = "gi"\n'
+        'update = true\n\n  [[fragment.files]]\n  name = "Python"\n'
+        '  path = "Python.gitignore"\n  commit = "abc"\n',  # missing `blob`
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError):
+        read_lock(target)
+
+
 def test_string_values_are_escaped(tmp_path: Path) -> None:
     """Paths containing quotes/backslashes round-trip safely."""
     frag = Fragment(

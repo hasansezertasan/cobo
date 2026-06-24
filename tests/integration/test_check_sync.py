@@ -14,7 +14,7 @@ from cobo.commands.record import record_dump
 from cobo.commands.sync import run_sync
 from cobo.config.schema import Source
 from cobo.lock.io import read_lock, write_lock
-from cobo.lock.schema import Lockfile
+from cobo.lock.schema import Fragment, LockedFile, Lockfile
 from cobo.source_commands import build_source_subapp
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
@@ -279,3 +279,27 @@ def test_sync_isolates_failed_fragment(tmp_path: Path) -> None:
     )
     assert result.changed == ()
     assert result.failed == (".gitignore",)
+
+
+def test_check_reports_error_when_source_unreachable(tmp_path: Path) -> None:
+    """A fragment whose source clone fails is reported as error, not a crash."""
+    bad = Source(
+        name="x",
+        url=str(tmp_path / "nonexistent.git"),
+        extension=".gitignore",
+        branch="main",
+    )
+    frag = Fragment(
+        path=".gitignore",
+        source="x",
+        files=(
+            LockedFile(name="P", path="P.gitignore", commit="a" * 40, blob="b" * 40),
+        ),
+    )
+    result = run_check(
+        Lockfile(version=1, fragments=(frag,)),
+        {"x": bad},
+        lambda _s: tmp_path / "clone",
+    )
+    assert result.outdated_count == 0
+    assert result.reports[0].error is not None

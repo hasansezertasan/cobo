@@ -21,9 +21,14 @@ when an origin moves ahead of the pinned commit.
 1. **Lockfile (`cobo.lock`) is the source of truth** — not header-scraping. It
    handles `multi_dump` (one output, several origins) and headerless sources that a
    header scanner can't see.
-2. **Per-source-file commit tracking** — each input file records its own resolved
-   repo-relative path and commit. Detects drift precisely and fixes the broken-URL
-   bug (we store the real path, not just `path.name`).
+2. **Per-source-file tracking with content-addressed detection** — each input file
+   records its resolved repo-relative path, the `commit` (full SHA, used for the
+   header/URL provenance), and a `blob` SHA used as the **drift key**. cobo's clones
+   are shallow (`depth=1`), so commit-history comparison (`git log -- path`) is not
+   available — it would flag every file whenever the branch HEAD moves. The blob SHA
+   (`git rev-parse HEAD:<path>`) is content-addressed, works on a shallow clone, and
+   changes iff the file content changes. Storing the resolved path also fixes the
+   broken-URL bug (real path, not just `path.name`).
 3. **Adoption:** `dump --lock` is the primary way entries are created. A
    `cobo lock import` (seed from existing headers) is a *deferred, later-phase*
    convenience, not part of v1.
@@ -53,12 +58,14 @@ update = true                  # false = held back by user
   [[fragment.files]]
   name   = "Python"            # the dumped name
   path   = "Python.gitignore"  # resolved repo-relative path (fixes URL bug)
-  commit = "abc1234..."        # full SHA the file was rendered from
+  commit = "abc1234..."        # full SHA the file was rendered from (provenance)
+  blob   = "b3ec7d5..."        # blob SHA at that commit (drift key)
 
   [[fragment.files]]
   name   = "Node"
   path   = "Node.gitignore"
   commit = "abc1234..."
+  blob   = "1a2b3c4..."
 
 [[fragment]]
 path = "mise.toml"
@@ -69,6 +76,7 @@ update = false                 # pinned; check/sync skip it
   name   = "python"
   path   = "python.mise.toml"
   commit = "def5678..."
+  blob   = "9f8e7d6..."
 ```
 
 ## Module layout
@@ -78,10 +86,10 @@ config style (frozen dataclasses, `slots`).
 
 | Module | Responsibility |
 |---|---|
-| `lock/schema.py` | `Lockfile`, `Fragment`, `LockedFile` dataclasses |
+| `lock/schema.py` | `Lockfile`, `Fragment`, `LockedFile` dataclasses (incl. `blob`) |
 | `lock/io.py` | Find-upward, parse, serialize, **atomic** write of `cobo.lock` |
-| `lock/diff.py` | Pure drift logic: lock entries + current source commits → `Outdated[]`. No git, no FS. |
-| `sources/repo.py` *(extend)* | `latest_commit_for_path(clone, branch, repo_path)` — per-file HEAD lookup |
+| `lock/diff.py` | Pure drift logic: lock entries + current blob SHAs → `Outdated[]`. No git, no FS. |
+| `sources/repo.py` *(extend)* | `blob_sha_for_path(clone, repo_path)` — `git rev-parse HEAD:<path>` |
 | `sources/render.py` *(revise)* | Two-line header + correct URL from resolved repo path |
 | `commands/check.py`, `commands/sync.py` | Thin CLI handlers wiring the above |
 
@@ -92,9 +100,9 @@ I/O is pushed to the edges in `repo.py`.
 
 ### `cobo <source> dump <name>... --lock --out <path>`
 
-Renders as today, and additionally resolves each name to its repo-relative path and
-the clone's current commit, then upserts a `[[fragment]]` keyed by the **output
-path**. Writing the lock requires a known output path, so `--lock` mandates `--out`;
+Renders as today, and additionally resolves each name to its repo-relative path, the
+clone's current commit, and the file's blob SHA (`git rev-parse HEAD:<path>`), then
+upserts a `[[fragment]]` keyed by the **output path**. Writing the lock requires a known output path, so `--lock` mandates `--out`;
 `--lock` with a stdout dump errors with a clear message. Re-dumping the same output
 path overwrites its entry (idempotent). New entries default `update = true`.
 
@@ -102,8 +110,9 @@ path overwrites its entry (idempotent). New entries default `update = true`.
 
 1. Load `cobo.lock` (error if absent).
 2. For each fragment with `update = true`, refresh its source clone, then for each
-   `LockedFile` call `repo.latest_commit_for_path(...)`.
-3. `lock/diff` compares pinned vs latest → `Outdated[]`.
+   `LockedFile` call `repo.blob_sha_for_path(clone, file.path)`.
+3. `lock/diff` compares each file's stored `blob` vs the current blob SHA →
+   `Outdated[]` (a fragment is outdated if any of its files' blobs differ).
 4. Render a Rich table; `--json` emits machine-readable output for the Action. The
    count of outdated fragments is reported in the output/JSON, not the exit code.
 5. **Exit code: `0` clean, `1` updates available, `2` usage/config error.** Pinned
@@ -114,7 +123,7 @@ path overwrites its entry (idempotent). New entries default `update = true`.
 1. Run `check`'s detection.
 2. For each outdated file: re-render from the current clone, rewrite the output file
    (preserving multi_dump concatenation order from the lock), advance that file's
-   `commit` in the lock.
+   `commit` and `blob` in the lock.
 3. `--dry-run` reports without writing; default writes files and `cobo.lock`.
 4. Honors `update = false`. Per-fragment isolation: one source failing skips that
    fragment and continues, with a non-zero summary.
@@ -194,8 +203,9 @@ report/JSON, not the exit code. No silent failures.
 
 Mirrors existing `tests/{unit,integration,e2e,smoke}` layout.
 
-- **unit** — `lock/diff.py` (pure: pinned-vs-latest → expected `Outdated[]`,
-  including multi_dump partial drift, all-pinned, empty lock); `lock/io.py`
+- **unit** — `lock/diff.py` (pure: stored-blob-vs-current-blob → expected
+  `Outdated[]`, including multi_dump partial drift, all-pinned, empty lock);
+  `lock/io.py`
   round-trip (serialize→parse identity, atomic write, find-upward); revised
   `render.py` header (two-line format; URL uses the full SHA and the resolved
   repo-relative path, including a nested `Global/` path that exposed the old bug).

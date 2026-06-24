@@ -58,12 +58,17 @@ def record_dump(  # noqa: PLR0913
             )
         )
     rel_out = os.path.relpath(out_path.resolve(), lock_path.parent.resolve())
+    rel_out_posix = rel_out.replace(os.sep, "/")
+    base = read_lock(lock_path) if lock_path.exists() else empty_lock()
+    preserved_update = next(
+        (f.update for f in base.fragments if f.path == rel_out_posix), True
+    )
     fragment = Fragment(
-        path=rel_out.replace(os.sep, "/"),
+        path=rel_out_posix,
         source=source.name,
         files=tuple(files),
+        update=preserved_update,
     )
-    base = read_lock(lock_path) if lock_path.exists() else empty_lock()
     write_lock(lock_path, upsert_fragment(base, fragment))
 
 

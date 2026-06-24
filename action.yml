@@ -1,0 +1,57 @@
+---
+name: cobo update fragments
+description: Re-render drifted cobo fragments and open a pull request.
+branding:
+  icon: refresh-cw
+  color: blue
+inputs:
+  config:
+    description: Path to a cobo config TOML (sets COBO_CONFIG). Optional.
+    required: false
+    default: ""
+  pr-title:
+    description: Title for the opened pull request.
+    required: false
+    default: "chore: update cobo fragments"
+  pr-labels:
+    description: Comma-separated labels for the pull request.
+    required: false
+    default: cobo
+  branch:
+    description: Branch the action pushes updates to.
+    required: false
+    default: cobo/update-fragments
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+    - name: Sync fragments
+      shell: bash
+      env:
+        COBO_CONFIG: ${{ inputs.config }}
+      run: |
+        uvx cobo sync
+        uvx cobo check --json > cobo-check.json || true
+    - name: Build PR body
+      id: body
+      shell: bash
+      run: |
+        {
+          echo "body<<EOF"
+          echo "Automated cobo fragment update."
+          echo
+          echo '```json'
+          cat cobo-check.json
+          echo '```'
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        rm -f cobo-check.json
+    - name: Create pull request
+      uses: peter-evans/create-pull-request@v7
+      with:
+        title: ${{ inputs.pr-title }}
+        labels: ${{ inputs.pr-labels }}
+        branch: ${{ inputs.branch }}
+        body: ${{ steps.body.outputs.body }}
+        commit-message: ${{ inputs.pr-title }}

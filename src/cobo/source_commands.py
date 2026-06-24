@@ -113,8 +113,9 @@ def _register_dump(  # noqa: C901
         """Dump boilerplate(s) to stdout or a file, optionally recording in the lock.
 
         Raises:
-            Exit: Code 1 if a name is not found or multi-dump is rejected;
-                code 2 if --lock is used without --out.
+            Exit: Code 1 if a name is not found, multi-dump is rejected, or the
+                output cannot be recorded relative to the lockfile; code 2 if
+                --lock is used without --out.
         """
         target = clone_root_provider(source)
         if not target.exists():
@@ -132,16 +133,21 @@ def _register_dump(  # noqa: C901
         if out is None:
             typer.echo(content, nl=False)
             return
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(content.encode("utf-8"))
         if lock:
-            record_dump(
-                source=source,
-                clone_root=target,
-                names=names,
-                out_path=out,
-                lock_path=resolve_lock_path(Path.cwd()),
-                commit_sha=commit_sha,
-            )
+            try:
+                record_dump(
+                    source=source,
+                    clone_root=target,
+                    names=names,
+                    out_path=out,
+                    lock_path=resolve_lock_path(Path.cwd()),
+                    commit_sha=commit_sha,
+                )
+            except UserError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(1) from exc
 
 
 def _register_root(

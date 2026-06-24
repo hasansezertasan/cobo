@@ -69,7 +69,8 @@ def _parse_fragment(raw: dict[str, Any], path: Path) -> Fragment:
         The parsed Fragment.
 
     Raises:
-        ConfigError: When a required key is missing.
+        ConfigError: When a required key is missing or a value is invalid (an
+            empty field, a malformed SHA, or a fragment with no files).
     """
     try:
         files = tuple(
@@ -86,6 +87,9 @@ def _parse_fragment(raw: dict[str, Any], path: Path) -> Fragment:
         )
     except KeyError as exc:
         msg = f"Lockfile {path}: fragment missing required key {exc}"
+        raise ConfigError(msg) from exc
+    except ValueError as exc:
+        msg = f"Lockfile {path}: invalid fragment ({exc})"
         raise ConfigError(msg) from exc
 
 

@@ -197,6 +197,29 @@ def test_sync_reports_failed_paths_and_exits_1(
     assert "failed: .gitignore: gone upstream" in result.output
 
 
+def test_check_outdated_exits_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo check` exits 1 when a fragment is outdated (drift detected)."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    outdated = FragmentReport(
+        path=".gitignore",
+        source="demo",
+        held=False,
+        drifts=(FileDrift(name="Python", path="p", old_blob="o", new_blob="n"),),
+    )
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_check",
+        MagicMock(return_value=CheckResult(reports=(outdated,))),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["check"])
+    assert result.exit_code == 1, result.output
+    assert "outdated" in result.output
+
+
 def test_clone_root_provider_maps_source_to_cache_path() -> None:
     """_clone_root_provider returns the cache clone root for the source name."""
     source = Source(name="gi", url="https://github.com/x/y", extension=".gitignore")
@@ -226,3 +249,27 @@ def test_print_check_table_renders_all_status_branches(
     assert "up to date" in out
     assert "held" in out
     assert "boom" in out
+
+
+def test_fragment_report_rejects_held_with_drifts() -> None:
+    """A held report carrying drifts is an illegal state and is rejected."""
+    drift = FileDrift(name="n", path="p", old_blob="o", new_blob="x")
+    with pytest.raises(ValueError, match="held"):
+        FragmentReport(path="a", source="s", held=True, drifts=(drift,))
+
+
+def test_fragment_report_rejects_error_with_drifts() -> None:
+    """An errored report cannot also carry drifts."""
+    drift = FileDrift(name="n", path="p", old_blob="o", new_blob="x")
+    with pytest.raises(ValueError, match="errored"):
+        FragmentReport(path="a", source="s", held=False, drifts=(drift,), error="boom")
+
+
+def test_sync_result_rejects_changed_failed_overlap() -> None:
+    """A path cannot be both changed and failed in the same SyncResult."""
+    with pytest.raises(ValueError, match="both changed and failed"):
+        SyncResult(
+            changed=(".gitignore",),
+            failed=(FailedFragment(path=".gitignore", reason="x"),),
+            check=CheckResult(reports=()),
+        )

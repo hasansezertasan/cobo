@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
 from cobo import globals as cobo_globals
+from cobo.commands.check import CheckResult
+from cobo.commands.sync import SyncResult
 from cobo.config.schema import CoboConfig, Source
 from cobo.errors import GitError
 from cobo.globals import attach_globals
@@ -126,3 +129,60 @@ def test_update_exits_with_failure_count(
     assert result.exit_code == 1
     assert "demo: failed" in result.output
     assert "remote unreachable" in result.output
+
+
+_LOCK_CONTENT = """\
+version = 1
+
+[[fragment]]
+path = ".gitignore"
+source = "does-not-exist"
+update = true
+
+  [[fragment.files]]
+  name = "Python"
+  path = "Python.gitignore"
+  commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  blob = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+"""
+
+
+def _make_sync_result(
+    changed: tuple[str, ...] = (),
+    failed: tuple[str, ...] = (),
+) -> SyncResult:
+    check = CheckResult(reports=())
+    return SyncResult(changed=changed, failed=failed, check=check)
+
+
+def test_sync_reports_changed_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo sync` prints updated paths and exits 0 when there are only changes."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_sync",
+        MagicMock(return_value=_make_sync_result(changed=(".gitignore",))),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "updated: .gitignore" in result.output
+
+
+def test_sync_reports_failed_paths_and_exits_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo sync` prints failed paths and exits 1 when any fragment failed."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_sync",
+        MagicMock(return_value=_make_sync_result(failed=(".gitignore",))),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 1, result.output

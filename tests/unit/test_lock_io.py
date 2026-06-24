@@ -118,6 +118,19 @@ def test_read_rejects_fragment_missing_required_key(tmp_path: Path) -> None:
         read_lock(target)
 
 
+def test_read_rejects_malformed_sha(tmp_path: Path) -> None:
+    """A hand-edited lockfile with a non-SHA blob is a ConfigError, not a crash."""
+    target = tmp_path / LOCK_FILENAME
+    target.write_text(
+        'version = 1\n\n[[fragment]]\npath = ".gitignore"\nsource = "gi"\n'
+        'update = true\n\n  [[fragment.files]]\n  name = "Python"\n'
+        '  path = "Python.gitignore"\n  commit = "abc"\n  blob = "nope"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="invalid fragment"):
+        read_lock(target)
+
+
 def test_string_values_are_escaped(tmp_path: Path) -> None:
     """Paths containing quotes/backslashes round-trip safely."""
     frag = Fragment(

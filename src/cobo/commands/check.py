@@ -39,6 +39,21 @@ class FragmentReport:
     drifts: tuple[FileDrift, ...]
     error: str | None = None
 
+    def __post_init__(self) -> None:
+        """Enforce that held / errored / drifted are mutually exclusive states.
+
+        Raises:
+            ValueError: When the report mixes states that cannot co-occur (a
+                held report with an error or drifts, or an errored report that
+                also carries drifts).
+        """
+        if self.held and (self.error is not None or self.drifts):
+            msg = "a held FragmentReport cannot also have an error or drifts"
+            raise ValueError(msg)
+        if self.error is not None and self.drifts:
+            msg = "an errored FragmentReport cannot also have drifts"
+            raise ValueError(msg)
+
     @property
     def outdated(self) -> bool:
         """Whether this fragment needs an update.

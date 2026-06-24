@@ -38,3 +38,46 @@ def test_lockfile_holds_version_and_fragments() -> None:
     lock = Lockfile(version=1, fragments=(frag,))
     assert lock.version == 1
     assert lock.fragments[0].files[0].blob == "b" * 40
+
+
+@pytest.mark.parametrize("bad", ["", "abc123", "a" * 39, "g" * 40, "A" * 40])
+def test_locked_file_rejects_malformed_sha(bad: str) -> None:
+    """Abbreviated, short, uppercase, or non-hex SHAs are rejected."""
+    with pytest.raises(ValueError, match="hex SHA"):
+        LockedFile(name="Python", path="Python.gitignore", commit=bad, blob="b" * 40)
+
+
+def test_locked_file_accepts_sha256() -> None:
+    """A 64-char SHA-256 object name is accepted."""
+    locked = LockedFile(
+        name="Python", path="Python.gitignore", commit="a" * 64, blob="b" * 64
+    )
+    assert locked.commit == "a" * 64
+
+
+def test_locked_file_rejects_empty_name_and_path() -> None:
+    """Empty name or path is rejected at construction."""
+    with pytest.raises(ValueError, match="name"):
+        LockedFile(name="", path="p", commit="a" * 40, blob="b" * 40)
+    with pytest.raises(ValueError, match="path"):
+        LockedFile(name="n", path="", commit="a" * 40, blob="b" * 40)
+
+
+def test_fragment_rejects_empty_files() -> None:
+    """A fragment with no input files renders nothing and is rejected."""
+    with pytest.raises(ValueError, match="at least one file"):
+        Fragment(path=".gitignore", source="gitignore", files=())
+
+
+def test_fragment_rejects_empty_path_and_source() -> None:
+    """Empty output path or source name is rejected at construction."""
+    with pytest.raises(ValueError, match="path"):
+        Fragment(path="", source="gitignore", files=(_file(),))
+    with pytest.raises(ValueError, match="source"):
+        Fragment(path=".gitignore", source="", files=(_file(),))
+
+
+def test_lockfile_rejects_version_below_one() -> None:
+    """A version below 1 is rejected."""
+    with pytest.raises(ValueError, match="version"):
+        Lockfile(version=0, fragments=())

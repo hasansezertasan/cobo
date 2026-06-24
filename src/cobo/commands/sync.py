@@ -47,6 +47,17 @@ class SyncResult:
     failed: tuple[FailedFragment, ...]
     check: CheckResult
 
+    def __post_init__(self) -> None:
+        """Enforce that no fragment is both changed and failed.
+
+        Raises:
+            ValueError: When a path appears in both ``changed`` and ``failed``.
+        """
+        overlap = set(self.changed) & {f.path for f in self.failed}
+        if overlap:
+            msg = f"fragments cannot be both changed and failed: {sorted(overlap)}"
+            raise ValueError(msg)
+
 
 def run_sync(  # noqa: C901,PLR0913
     lock: Lockfile,

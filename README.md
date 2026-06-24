@@ -143,6 +143,47 @@ cobo
     └── remote          (this source's git URL)
 ```
 
+## Keeping fragments up to date
+
+cobo can track dumped boilerplates and alert you when upstream templates change —
+the same Dependabot/Renovate pattern applied to boilerplates.
+
+**Record a dump:**
+
+```sh
+cobo gitignore dump Python Node --out .gitignore --lock
+```
+
+`--lock` writes a `cobo.lock` file alongside the output. Re-run after
+`cobo gitignore update` to refresh the pin. (`--lock` requires `--out`.)
+
+**Check for drift:**
+
+```sh
+cobo check          # Rich table; exits 0 (clean), 1 (updates available), 2 (no lock)
+cobo check --json   # machine-readable JSON with outdated_count and fragments array
+```
+
+**Apply updates:**
+
+```sh
+cobo sync           # re-renders outdated fragments and advances cobo.lock
+cobo sync --dry-run # shows changes without writing
+```
+
+Commit the updated output files and `cobo.lock` together.
+
+**Hold a fragment back:** set `update = false` in its `[[fragment]]` block in
+`cobo.lock`; `check` and `sync` skip it and show it as "held".
+
+**Automate with GitHub Actions:** add `hasansezertasan/cobo@v1` to a weekly
+workflow — it runs `cobo sync` and opens a PR when fragments drift. Requires
+`permissions: contents: write` and `pull-requests: write`.
+
+See [docs/fragment-updates.md](docs/fragment-updates.md) for the full guide:
+lockfile format, exit-code tables, provenance headers, and a ready-to-paste
+consuming workflow.
+
 ## Author
 
 Maintained by [Hasan Sezer Taşan](https://github.com/hasansezertasan).

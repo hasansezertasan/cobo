@@ -6,16 +6,20 @@ import subprocess  # noqa: S404
 from typing import TYPE_CHECKING
 
 import pytest
+from typer.testing import CliRunner
 
 from cobo.commands.record import record_dump
 from cobo.config.schema import Source
 from cobo.lock.io import read_lock
+from cobo.source_commands import build_source_subapp
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.integration
+
+runner = CliRunner()
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -88,3 +92,32 @@ def test_record_dump_writes_lock_entry(tmp_path: Path) -> None:
     assert frag.files[0].name == "Python"
     assert frag.files[0].path == "Python.gitignore"
     assert len(frag.files[0].blob) == 40  # noqa: PLR2004
+
+
+def test_dump_lock_without_out_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --lock` without `--out` is a usage error (exit 2)."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--lock"])
+    assert result.exit_code == 2, result.output  # noqa: PLR2004
+
+
+def test_dump_out_and_lock_writes_file_and_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --out FILE --lock` writes the file and records it in cobo.lock."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
+    assert result.exit_code == 0, result.output
+    assert out.read_text(encoding="utf-8") == "*.pyc\n"
+    lock = read_lock(tmp_path / "cobo.lock")
+    assert lock.fragments[0].path == ".gitignore"
+    assert lock.fragments[0].files[0].name == "Python"

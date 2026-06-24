@@ -144,13 +144,14 @@ def _q(value: str) -> str:
 
     Returns:
         ``value`` wrapped in double quotes with backslash, quote, newline,
-        and tab escaped.
+        carriage return, and tab escaped.
     """
     escaped = (
         value
         .replace("\\", "\\\\")
         .replace('"', '\\"')
         .replace("\n", "\\n")
+        .replace("\r", "\\r")
         .replace("\t", "\\t")
     )
     return f'"{escaped}"'

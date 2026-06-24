@@ -246,8 +246,8 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
         )
         for path in result.changed:
             typer.echo(f"updated: {path}")
-        for path in result.failed:
-            typer.echo(f"failed: {path}", err=True)
+        for failure in result.failed:
+            typer.echo(f"failed: {failure.path}: {failure.reason}", err=True)
         if not result.changed and not result.failed:
             typer.echo("All fragments up to date.")
         raise typer.Exit(1 if result.failed else 0)

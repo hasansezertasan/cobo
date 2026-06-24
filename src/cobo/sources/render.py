@@ -68,7 +68,7 @@ def dump_locked(
 
 
 def _concat(chunks: list[str]) -> str:
-    """Join rendered chunks with a single blank line, one trailing newline.
+    """Join multiple chunks with a single blank line and one trailing newline.
 
     Returns:
         The single chunk unchanged, or chunks joined by one blank line.

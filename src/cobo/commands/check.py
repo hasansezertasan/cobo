@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cobo.errors import GitError
+from cobo.errors import FileAbsentError, GitError
 from cobo.lock.diff import compute_fragment_drift
 from cobo.sources.repo import blob_sha_for_path, clone_or_pull
 
@@ -81,8 +81,14 @@ def gather_current_blobs(
         refresh: When True, clone/pull before reading blobs.
 
     Returns:
-        Map of repo-relative path -> current blob SHA, or None when a file
-        could not be resolved (e.g. it was deleted upstream).
+        Map of repo-relative path -> current blob SHA, or None when the file is
+        genuinely gone upstream (its path no longer resolves at HEAD).
+
+    Note:
+        Only an absent path (``FileAbsentError``) is mapped to None. A broken
+        clone or failed refresh raises ``GitError`` from ``clone_or_pull`` /
+        ``blob_sha_for_path`` so it surfaces as a fragment error rather than as
+        phantom drift across every file.
     """
     if refresh:
         clone_or_pull(source, clone_root)
@@ -90,7 +96,7 @@ def gather_current_blobs(
     for file in fragment.files:
         try:
             blobs[file.path] = blob_sha_for_path(clone_root, file.path)
-        except GitError:
+        except FileAbsentError:
             blobs[file.path] = None
     return blobs
 

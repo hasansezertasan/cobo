@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cobo.config.schema import Source
-from cobo.errors import GitError
+from cobo.errors import FileAbsentError, GitError
 from cobo.sources.repo import blob_sha_for_path, clone_or_pull
 
 if TYPE_CHECKING:
@@ -71,13 +71,22 @@ def test_blob_sha_resolves_nested_path(tmp_path: Path) -> None:
     assert blob_sha_for_path(clone, "Global/macOS.gitignore")
 
 
-def test_blob_sha_missing_path_raises_git_error(tmp_path: Path) -> None:
-    """A path absent from HEAD raises GitError."""
+def test_blob_sha_missing_path_raises_file_absent(tmp_path: Path) -> None:
+    """A path absent from HEAD raises FileAbsentError (a GitError subclass)."""
     upstream = _make_bare_repo(tmp_path)
     clone = tmp_path / "clone"
     clone_or_pull(
         Source(name="x", url=str(upstream), extension=".gitignore", branch="main"),
         clone,
     )
-    with pytest.raises(GitError):
+    with pytest.raises(FileAbsentError):
         blob_sha_for_path(clone, "Nope.gitignore")
+
+
+def test_blob_sha_invalid_clone_raises_git_error(tmp_path: Path) -> None:
+    """A non-repository path raises plain GitError, not FileAbsentError."""
+    not_a_repo = tmp_path / "empty"
+    not_a_repo.mkdir()
+    with pytest.raises(GitError) as exc_info:
+        blob_sha_for_path(not_a_repo, "Python.gitignore")
+    assert not isinstance(exc_info.value, FileAbsentError)

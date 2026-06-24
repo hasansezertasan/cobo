@@ -278,7 +278,8 @@ def test_sync_isolates_failed_fragment(tmp_path: Path) -> None:
         lock_path=lock_path,
     )
     assert result.changed == ()
-    assert result.failed == (".gitignore",)
+    assert tuple(f.path for f in result.failed) == (".gitignore",)
+    assert result.failed[0].reason  # the cause is captured, not discarded
 
 
 def test_record_dump_preserves_held_flag(tmp_path: Path) -> None:
@@ -393,7 +394,7 @@ def test_sync_reports_unreachable_source_as_failure(tmp_path: Path) -> None:
         lock_path=tmp_path / "cobo.lock",
     )
     assert result.changed == ()
-    assert result.failed == (".gitignore",)
+    assert tuple(f.path for f in result.failed) == (".gitignore",)
 
 
 def test_sync_isolates_write_failure(tmp_path: Path) -> None:
@@ -414,7 +415,7 @@ def test_sync_isolates_write_failure(tmp_path: Path) -> None:
         lock_path=lock_path,
     )
     assert result.changed == ()
-    assert result.failed == (".gitignore",)
+    assert tuple(f.path for f in result.failed) == (".gitignore",)
 
 
 def test_check_without_refresh_uses_existing_clone(tmp_path: Path) -> None:

@@ -21,17 +21,30 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
+class FailedFragment:
+    """A fragment that could not be synced, with the reason it failed.
+
+    Attributes:
+        path: Output path of the fragment.
+        reason: Human-readable cause (the underlying error message).
+    """
+
+    path: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class SyncResult:
     """Outcome of a sync run.
 
     Attributes:
         changed: Output paths that were (or, in dry-run, would be) rewritten.
-        failed: Output paths that errored during re-render.
+        failed: Fragments that errored during re-render, each with its reason.
         check: The underlying CheckResult that drove the sync.
     """
 
     changed: tuple[str, ...]
-    failed: tuple[str, ...]
+    failed: tuple[FailedFragment, ...]
     check: CheckResult
 
 
@@ -61,11 +74,11 @@ def run_sync(  # noqa: C901,PLR0913
     """
     result = run_check(lock, sources, clone_root_provider, refresh=refresh)
     changed: list[str] = []
-    failed: list[str] = []
+    failed: list[FailedFragment] = []
     new_fragments: list[Fragment] = []
     for frag, report in zip(lock.fragments, result.reports, strict=True):
         if report.error is not None:
-            failed.append(frag.path)
+            failed.append(FailedFragment(path=frag.path, reason=report.error))
             new_fragments.append(frag)
             continue
         if not report.outdated:
@@ -79,8 +92,8 @@ def run_sync(  # noqa: C901,PLR0913
                 lock_dir,
                 dry_run=dry_run,
             )
-        except CoboError, OSError:
-            failed.append(frag.path)
+        except (CoboError, OSError) as exc:
+            failed.append(FailedFragment(path=frag.path, reason=str(exc)))
             new_fragments.append(frag)
             continue
         changed.append(frag.path)

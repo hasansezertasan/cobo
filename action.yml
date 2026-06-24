@@ -27,20 +27,43 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@v6
     - name: Sync fragments
+      id: sync
       shell: bash
       env:
         COBO_CONFIG: ${{ inputs.config }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        uvx cobo sync
-        uvx cobo check --json > cobo-check.json || true
+        set -uo pipefail
+        # Run the cobo that ships with this action ref (not whatever is newest
+        # on PyPI), so the CLI and lockfile schema can never drift apart.
+        cobo=(uvx --from "$ACTION_PATH" cobo)
+        # Capture the drift that motivates this PR *before* sync runs: sync
+        # advances the lockfile, after which `check` would report nothing.
+        "${cobo[@]}" check --json > cobo-check.json || true
+        # Re-render outdated fragments. A non-zero exit means some fragment
+        # failed to re-render; still open a PR for the ones that succeeded and
+        # record the failure so it surfaces in the PR body instead of aborting.
+        if "${cobo[@]}" sync; then
+          echo "sync_failed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "sync_failed=true" >> "$GITHUB_OUTPUT"
+        fi
     - name: Build PR body
       id: body
       shell: bash
+      env:
+        SYNC_FAILED: ${{ steps.sync.outputs.sync_failed }}
       run: |
         {
           echo "body<<EOF"
           echo "Automated cobo fragment update."
           echo
+          if [ "$SYNC_FAILED" = "true" ]; then
+            echo "> [!WARNING]"
+            echo "> Some fragments failed to re-render. See the workflow log."
+            echo
+          fi
+          echo "Drift detected before sync:"
           echo '```json'
           cat cobo-check.json
           echo '```'

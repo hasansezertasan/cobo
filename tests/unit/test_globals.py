@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from cobo import globals as cobo_globals
 from cobo.commands.check import CheckResult, FragmentReport
-from cobo.commands.sync import SyncResult
+from cobo.commands.sync import FailedFragment, SyncResult
 from cobo.config.schema import CoboConfig, Source
 from cobo.errors import GitError
 from cobo.globals import attach_globals
@@ -153,7 +153,7 @@ update = true
 
 def _make_sync_result(
     changed: tuple[str, ...] = (),
-    failed: tuple[str, ...] = (),
+    failed: tuple[FailedFragment, ...] = (),
 ) -> SyncResult:
     check = CheckResult(reports=())
     return SyncResult(changed=changed, failed=failed, check=check)
@@ -180,16 +180,21 @@ def test_sync_reports_failed_paths_and_exits_1(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`cobo sync` prints failed paths and exits 1 when any fragment failed."""
+    """`cobo sync` prints failed paths with their reason and exits 1."""
     (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         cobo_globals,
         "run_sync",
-        MagicMock(return_value=_make_sync_result(failed=(".gitignore",))),
+        MagicMock(
+            return_value=_make_sync_result(
+                failed=(FailedFragment(path=".gitignore", reason="gone upstream"),),
+            ),
+        ),
     )
     result = runner.invoke(app_with_globals(tmp_path), ["sync"])
     assert result.exit_code == 1, result.output
+    assert "failed: .gitignore: gone upstream" in result.output
 
 
 def test_clone_root_provider_maps_source_to_cache_path() -> None:

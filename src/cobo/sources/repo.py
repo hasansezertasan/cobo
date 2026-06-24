@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from git import GitCommandError, InvalidGitRepositoryError, NoSuchPathError, Repo
 
-from cobo.errors import ConfigError, GitError
+from cobo.errors import ConfigError, FileAbsentError, GitError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -104,11 +104,18 @@ def blob_sha_for_path(clone_root: Path, repo_path: str) -> str:
         The 40-character blob SHA.
 
     Raises:
-        GitError: When the clone is invalid or the path is absent at HEAD.
+        FileAbsentError: When ``repo_path`` does not exist at HEAD (the file was
+            removed upstream) — a legitimate drift signal.
+        GitError: When the clone itself is invalid or missing (an infrastructure
+            failure, not a deletion).
     """
     try:
         repo = Repo(clone_root)
-        return str(repo.git.rev_parse(f"HEAD:{repo_path}"))
-    except (GitCommandError, InvalidGitRepositoryError, NoSuchPathError) as exc:
+    except (InvalidGitRepositoryError, NoSuchPathError) as exc:
         msg = f"could not resolve blob for '{repo_path}' in {clone_root}: {exc}"
         raise GitError(msg) from exc
+    try:
+        return str(repo.git.rev_parse(f"HEAD:{repo_path}"))
+    except GitCommandError as exc:
+        msg = f"path '{repo_path}' is absent at HEAD in {clone_root}: {exc}"
+        raise FileAbsentError(msg) from exc

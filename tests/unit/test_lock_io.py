@@ -118,4 +118,4 @@ def test_string_values_are_escaped(tmp_path: Path) -> None:
     )
     target = tmp_path / LOCK_FILENAME
     write_lock(target, Lockfile(version=1, fragments=(frag,)))
-    assert read_lock(target).fragments[0].path == 'weird".gitignore'
+    assert read_lock(target) == Lockfile(version=1, fragments=(frag,))

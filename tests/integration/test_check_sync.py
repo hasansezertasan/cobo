@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import subprocess  # noqa: S404
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
 from typer.testing import CliRunner
 
+from cobo.commands.check import run_check
 from cobo.commands.record import record_dump
 from cobo.config.schema import Source
-from cobo.lock.io import read_lock
+from cobo.lock.io import read_lock, write_lock
+from cobo.lock.schema import Lockfile
 from cobo.source_commands import build_source_subapp
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.integration
@@ -121,3 +125,63 @@ def test_dump_out_and_lock_writes_file_and_records(
     lock = read_lock(tmp_path / "cobo.lock")
     assert lock.fragments[0].path == ".gitignore"
     assert lock.fragments[0].files[0].name == "Python"
+
+
+def _provider_factory(clone: Path) -> Callable[[Source], Path]:
+    def provider(_source: Source) -> Path:
+        return clone
+
+    return provider
+
+
+def _record(tmp_path: Path, source: Source, clone: Path, names: list[str]) -> Path:
+    out = tmp_path / ".gitignore"
+    lock_path = tmp_path / "cobo.lock"
+    record_dump(
+        source=source,
+        clone_root=clone,
+        names=names,
+        out_path=out,
+        lock_path=lock_path,
+        commit_sha=current_commit_sha(clone),
+    )
+    return lock_path
+
+
+def test_check_reports_no_drift_when_unchanged(tmp_path: Path) -> None:
+    """A freshly recorded fragment shows no drift."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    result = run_check(
+        read_lock(lock_path), {source.name: source}, _provider_factory(clone)
+    )
+    assert result.outdated_count == 0
+
+
+def test_check_detects_drift_after_upstream_change(tmp_path: Path) -> None:
+    """Advancing the upstream file makes the fragment outdated."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    result = run_check(
+        read_lock(lock_path), {source.name: source}, _provider_factory(clone)
+    )
+    assert result.outdated_count == 1
+
+
+def test_check_skips_held_fragment(tmp_path: Path) -> None:
+    """update=False fragments are reported as held, never outdated."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    lock = read_lock(lock_path)
+    held = replace(lock.fragments[0], update=False)
+    write_lock(lock_path, Lockfile(version=1, fragments=(held,)))
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    result = run_check(
+        read_lock(lock_path), {source.name: source}, _provider_factory(clone)
+    )
+    assert result.outdated_count == 0
+    assert result.reports[0].held is True

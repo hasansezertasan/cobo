@@ -175,11 +175,14 @@ cobo sync --dry-run
 | Code | Meaning |
 |---|---|
 | `0` | All fragments were applied (or there was nothing to do). |
-| `1` | One or more fragments failed to re-render. |
+| `1` | One or more fragments **could not be evaluated or re-rendered** (e.g. an unknown or unreachable source, or an unwritable output path). |
 | `2` | No `cobo.lock` found. Run `cobo <source> dump --lock` first. |
 
 > `cobo sync` does **not** exit 1 merely because updates existed — exit 1 means a
 > re-render actually failed. A clean sync with changes applied exits 0.
+>
+> Unlike `cobo check` (which exits 0 even when `error` entries are present), `cobo
+> sync` treats un-evaluable fragments as failures so CI and the Action fail loudly.
 
 After running `cobo sync`, commit both the updated output files and the updated
 `cobo.lock`.

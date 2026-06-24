@@ -335,3 +335,83 @@ def test_check_reports_error_when_source_unreachable(tmp_path: Path) -> None:
     )
     assert result.outdated_count == 0
     assert result.reports[0].error is not None
+
+
+def add_to_source(tmp_path: Path, name: str, content: str) -> None:
+    """Add a new file ``name`` to the upstream repo and push."""
+    seed = tmp_path / "seed"
+    target = seed / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-q", "-m", "add")
+    _git(seed, "push", "-q", "origin", "main")
+
+
+def test_sync_renders_locked_path_not_rediscovered_name(tmp_path: Path) -> None:
+    """Sync re-renders the exact locked path even when a shorter same-stem path appears.
+
+    (Issue A: render from locked paths, not rediscovered names.)
+    """
+    source, clone = make_source(tmp_path, {"sub/Python.gitignore": "NESTED\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    assert read_lock(lock_path).fragments[0].files[0].path == "sub/Python.gitignore"
+    # A shorter same-stem path now exists upstream AND the locked file drifts.
+    add_to_source(tmp_path, "Python.gitignore", "ROOT\n")
+    advance_source(tmp_path, "sub/Python.gitignore", "NESTED2\n")
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert result.changed == (".gitignore",)
+    # Content must come from the LOCKED nested path, not the rediscovered root file.
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "NESTED2\n"
+    assert read_lock(lock_path).fragments[0].files[0].path == "sub/Python.gitignore"
+
+
+def test_sync_reports_unreachable_source_as_failure(tmp_path: Path) -> None:
+    """A fragment whose source can't be evaluated is a failure, not a silent no-op."""
+    bad = Source(
+        name="x", url=str(tmp_path / "nope.git"), extension=".gitignore", branch="main"
+    )
+    frag = Fragment(
+        path=".gitignore",
+        source="x",
+        files=(
+            LockedFile(name="P", path="P.gitignore", commit="a" * 40, blob="b" * 40),
+        ),
+    )
+    result = run_sync(
+        Lockfile(version=1, fragments=(frag,)),
+        {"x": bad},
+        lambda _s: tmp_path / "clone",
+        lock_dir=tmp_path,
+        lock_path=tmp_path / "cobo.lock",
+    )
+    assert result.changed == ()
+    assert result.failed == (".gitignore",)
+
+
+def test_sync_isolates_write_failure(tmp_path: Path) -> None:
+    """An OSError writing the output is isolated as a failed fragment, not a crash."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    # Make the output path unwritable by turning it into a directory.
+    # (_record does not write the output file, so we create the dir directly.)
+    out = tmp_path / ".gitignore"
+    out.mkdir()
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert result.changed == ()
+    assert result.failed == (".gitignore",)

@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from cobo.commands.check import run_check
 from cobo.commands.record import record_dump
+from cobo.commands.sync import run_sync
 from cobo.config.schema import Source
 from cobo.lock.io import read_lock, write_lock
 from cobo.lock.schema import Lockfile
@@ -185,3 +186,65 @@ def test_check_skips_held_fragment(tmp_path: Path) -> None:
     )
     assert result.outdated_count == 0
     assert result.reports[0].held is True
+
+
+def test_sync_rewrites_file_and_advances_lock(tmp_path: Path) -> None:
+    """Sync re-renders the drifted file and updates its blob in the lock."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    old_blob = read_lock(lock_path).fragments[0].files[0].blob
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert result.changed == (".gitignore",)
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "*.pyc\n*.pyo\n"
+    assert read_lock(lock_path).fragments[0].files[0].blob != old_blob
+
+
+def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
+    """dry_run reports changes but does not touch files or the lock."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    out = tmp_path / ".gitignore"
+    out.write_text("*.pyc\n", encoding="utf-8")
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+        dry_run=True,
+    )
+    assert result.changed == (".gitignore",)
+    assert out.read_text(encoding="utf-8") == "*.pyc\n"  # unchanged
+
+
+def test_sync_skips_held_fragment(tmp_path: Path) -> None:
+    """A held fragment is never rewritten."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    lock = read_lock(lock_path)
+    write_lock(
+        lock_path,
+        Lockfile(version=1, fragments=(replace(lock.fragments[0], update=False),)),
+    )
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert result.changed == ()

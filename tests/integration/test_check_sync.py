@@ -281,6 +281,38 @@ def test_sync_isolates_failed_fragment(tmp_path: Path) -> None:
     assert result.failed == (".gitignore",)
 
 
+def test_record_dump_preserves_held_flag(tmp_path: Path) -> None:
+    """Re-recording a held (update=false) fragment must keep it held."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    out = tmp_path / ".gitignore"
+    lock_path = tmp_path / "cobo.lock"
+    record_dump(
+        source=source,
+        clone_root=clone,
+        names=["Python"],
+        out_path=out,
+        lock_path=lock_path,
+        commit_sha=current_commit_sha(clone),
+    )
+    # User pins the fragment as held.
+    lock = read_lock(lock_path)
+    write_lock(
+        lock_path,
+        Lockfile(version=1, fragments=(replace(lock.fragments[0], update=False),)),
+    )
+    # Re-record the same output: held flag must survive.
+    record_dump(
+        source=source,
+        clone_root=clone,
+        names=["Python"],
+        out_path=out,
+        lock_path=lock_path,
+        commit_sha=current_commit_sha(clone),
+    )
+    assert read_lock(lock_path).fragments[0].update is False
+
+
 def test_check_reports_error_when_source_unreachable(tmp_path: Path) -> None:
     """A fragment whose source clone fails is reported as error, not a crash."""
     bad = Source(

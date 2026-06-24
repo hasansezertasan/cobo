@@ -75,6 +75,15 @@ def advance_source(tmp_path: Path, name: str, content: str) -> None:
     _git(seed, "push", "-q", "origin", "main")
 
 
+def delete_from_source(tmp_path: Path, name: str) -> None:
+    """Delete ``name`` from the upstream repo and push the removal."""
+    seed = tmp_path / "seed"
+    (seed / name).unlink()
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-q", "-m", "delete")
+    _git(seed, "push", "-q", "origin", "main")
+
+
 def test_record_dump_writes_lock_entry(tmp_path: Path) -> None:
     """record_dump persists a fragment with per-file path/commit/blob."""
     source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
@@ -213,6 +222,7 @@ def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
     source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
     clone_or_pull(source, clone)
     lock_path = _record(tmp_path, source, clone, ["Python"])
+    old_commit = read_lock(lock_path).fragments[0].files[0].commit
     out = tmp_path / ".gitignore"
     out.write_text("*.pyc\n", encoding="utf-8")
     advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
@@ -227,6 +237,7 @@ def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
     )
     assert result.changed == (".gitignore",)
     assert out.read_text(encoding="utf-8") == "*.pyc\n"  # unchanged
+    assert read_lock(lock_path).fragments[0].files[0].commit == old_commit
 
 
 def test_sync_skips_held_fragment(tmp_path: Path) -> None:
@@ -248,3 +259,23 @@ def test_sync_skips_held_fragment(tmp_path: Path) -> None:
         lock_path=lock_path,
     )
     assert result.changed == ()
+
+
+def test_sync_isolates_failed_fragment(tmp_path: Path) -> None:
+    """If a tracked file vanishes upstream, sync isolates that fragment."""
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    delete_from_source(tmp_path, "Python.gitignore")
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert result.changed == ()
+    assert result.failed == (".gitignore",)

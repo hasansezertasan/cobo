@@ -13,6 +13,7 @@ from rich.table import Table
 
 from cobo import __version__
 from cobo.commands.check import CheckResult, run_check
+from cobo.commands.sync import run_sync
 from cobo.errors import GitError
 from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
@@ -46,6 +47,7 @@ def attach_globals(
     _register_config(app, config=config)
     _register_config_path(app, user_config_file=user_config_file)
     _register_check(app, config=config)
+    _register_sync(app, config=config)
 
 
 def _register_version(app: typer.Typer) -> None:
@@ -213,3 +215,39 @@ def _print_check_table(result: CheckResult) -> None:
         table.add_row(r.path, r.source, status)
     _console.print(table)
     _console.print(f"{result.outdated_count} fragment(s) need updating.")
+
+
+def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C901
+    @app.command()
+    def sync(
+        dry_run: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--dry-run",
+            help="Show what would change without writing.",
+        ),
+    ) -> None:
+        """Re-render outdated fragments and open them for commit.
+
+        Raises:
+            Exit: Code 2 when no cobo.lock is found; code 1 when any fragment
+                failed to re-render; code 0 otherwise.
+        """
+        lock_path = find_lock(Path.cwd())
+        if lock_path is None:
+            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
+            raise typer.Exit(2)
+        result = run_sync(
+            read_lock(lock_path),
+            config.sources,
+            _clone_root_provider,
+            lock_dir=lock_path.parent,
+            lock_path=lock_path,
+            dry_run=dry_run,
+        )
+        for path in result.changed:
+            typer.echo(f"updated: {path}")
+        for path in result.failed:
+            typer.echo(f"failed: {path}", err=True)
+        if not result.changed and not result.failed:
+            typer.echo("All fragments up to date.")
+        raise typer.Exit(1 if result.failed else 0)

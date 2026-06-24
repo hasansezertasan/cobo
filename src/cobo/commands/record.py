@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from cobo.errors import UserError
 from cobo.lock.io import (
     LOCK_FILENAME,
     empty_lock,
@@ -44,6 +45,10 @@ def record_dump(  # noqa: PLR0913
         out_path: The file the dump was written to.
         lock_path: Where the lockfile lives (created if absent).
         commit_sha: Full HEAD SHA of the clone at render time.
+
+    Raises:
+        UserError: When the output and the lockfile sit on different drives
+            (Windows), so no relative path between them exists.
     """
     files: list[LockedFile] = []
     for name in names:
@@ -57,7 +62,15 @@ def record_dump(  # noqa: PLR0913
                 blob=blob_sha_for_path(clone_root, repo_rel),
             )
         )
-    rel_out = os.path.relpath(out_path.resolve(), lock_path.parent.resolve())
+    try:
+        rel_out = os.path.relpath(out_path.resolve(), lock_path.parent.resolve())
+    except ValueError as exc:
+        msg = (
+            f"Cannot record '{out_path}' in {lock_path}: the output and the"
+            " lockfile are on different drives, so no relative path links them."
+            " Place cobo.lock on the same drive as the output file."
+        )
+        raise UserError(msg) from exc
     rel_out_posix = rel_out.replace(os.sep, "/")
     base = read_lock(lock_path) if lock_path.exists() else empty_lock()
     preserved_update = next(

@@ -9,10 +9,12 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
+from cobo.commands import record as record_module
 from cobo.commands.check import run_check
 from cobo.commands.record import record_dump
 from cobo.commands.sync import run_sync
 from cobo.config.schema import Source
+from cobo.errors import UserError
 from cobo.lock.io import read_lock, write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
 from cobo.source_commands import build_source_subapp
@@ -135,6 +137,63 @@ def test_dump_out_and_lock_writes_file_and_records(
     lock = read_lock(tmp_path / "cobo.lock")
     assert lock.fragments[0].path == ".gitignore"
     assert lock.fragments[0].files[0].name == "Python"
+
+
+def test_dump_out_creates_missing_parent_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --out` creates the output's parent directories if they are absent."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "nested" / "dir" / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.read_text(encoding="utf-8") == "*.pyc\n"
+
+
+def test_record_dump_cross_drive_raises_user_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cross-drive output/lock pair is a clean UserError, not a raw traceback."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+
+    def _raise_cross_drive(*_args: object, **_kwargs: object) -> str:
+        msg = "path is on mount 'C:', start on mount 'D:'"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(record_module.os.path, "relpath", _raise_cross_drive)
+    with pytest.raises(UserError, match="different drives"):
+        record_dump(
+            source=source,
+            clone_root=clone,
+            names=["Python"],
+            out_path=tmp_path / ".gitignore",
+            lock_path=tmp_path / "cobo.lock",
+            commit_sha=current_commit_sha(clone),
+        )
+
+
+def test_dump_lock_cross_drive_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --lock` surfaces a cross-drive record failure as exit 1, not a crash."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+
+    def _raise_cross_drive(*_args: object, **_kwargs: object) -> str:
+        msg = "path is on mount 'C:', start on mount 'D:'"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(record_module.os.path, "relpath", _raise_cross_drive)
+    out = tmp_path / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
+    assert result.exit_code == 1, result.output
+    assert "different drives" in result.output
 
 
 def _provider_factory(clone: Path) -> Callable[[Source], Path]:

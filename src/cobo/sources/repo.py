@@ -87,3 +87,28 @@ def current_commit_sha(clone_root: Path) -> str:
         msg = f"not a git repository: {clone_root}"
         raise GitError(msg) from exc
     return repo.head.commit.hexsha
+
+
+def blob_sha_for_path(clone_root: Path, repo_path: str) -> str:
+    """Return the blob SHA of ``repo_path`` at the clone's HEAD.
+
+    Uses ``git rev-parse HEAD:<path>``, which works on a shallow (depth-1)
+    clone and is content-addressed: the SHA changes iff the file content
+    changes. This is the drift key for fragment updates.
+
+    Args:
+        clone_root: Path to an existing source clone.
+        repo_path: Repo-relative POSIX path of the file at HEAD.
+
+    Returns:
+        The 40-character blob SHA.
+
+    Raises:
+        GitError: When the clone is invalid or the path is absent at HEAD.
+    """
+    try:
+        repo = Repo(clone_root)
+        return str(repo.git.rev_parse(f"HEAD:{repo_path}"))
+    except (GitCommandError, InvalidGitRepositoryError, NoSuchPathError) as exc:
+        msg = f"could not resolve blob for '{repo_path}' in {clone_root}: {exc}"
+        raise GitError(msg) from exc

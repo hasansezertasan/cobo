@@ -98,9 +98,7 @@ def test_fragment_defaults_to_update_true() -> None:
 
 def test_fragment_can_be_pinned() -> None:
     """update=False marks a held-back fragment."""
-    frag = Fragment(
-        path="mise.toml", source="mise", files=(_file(),), update=False
-    )
+    frag = Fragment(path="mise.toml", source="mise", files=(_file(),), update=False)
     assert frag.update is False
 
 
@@ -292,7 +290,9 @@ def test_upsert_replaces_existing_path(tmp_path: Path) -> None:
         path=".gitignore",
         source="gitignore",
         files=(
-            LockedFile(name="Node", path="Node.gitignore", commit="c" * 40, blob="d" * 40),
+            LockedFile(
+                name="Node", path="Node.gitignore", commit="c" * 40, blob="d" * 40
+            ),
         ),
     )
     lock = upsert_fragment(lock, replacement)
@@ -477,7 +477,8 @@ def _q(value: str) -> str:
         and tab escaped.
     """
     escaped = (
-        value.replace("\\", "\\\\")
+        value
+        .replace("\\", "\\\\")
         .replace('"', '\\"')
         .replace("\n", "\\n")
         .replace("\t", "\\t")
@@ -839,9 +840,7 @@ def dump(source: Source, clone_root: Path, names: list[str], commit_sha: str) ->
     return "\n\n".join(stripped) + "\n"
 
 
-def _render_one(
-    source: Source, path: Path, repo_rel_path: str, commit_sha: str
-) -> str:
+def _render_one(source: Source, path: Path, repo_rel_path: str, commit_sha: str) -> str:
     """Render a single boilerplate file (optionally with header).
 
     Returns:
@@ -999,9 +998,7 @@ def test_header_omits_url_for_non_github_source() -> None:
         extension=".tpl",
         inject_header=True,
     )
-    header = build_header(
-        source=source, repo_rel_path="x.tpl", commit_sha="d" * 40
-    )
+    header = build_header(source=source, repo_rel_path="x.tpl", commit_sha="d" * 40)
     assert "gitlab.example.com" not in header
     assert "—" not in header
     assert header.splitlines()[1] == "# custom/x@dddddddd"[: len("# custom/x@") + 7]
@@ -1095,7 +1092,10 @@ def make_source(tmp_path: Path, files: dict[str, str]) -> tuple[Source, Path]:
     _git(seed, "remote", "add", "origin", str(upstream))
     _git(seed, "push", "-q", "origin", "main")
     source = Source(
-        name="gi", url=str(upstream), extension=".gitignore", branch="main",
+        name="gi",
+        url=str(upstream),
+        extension=".gitignore",
+        branch="main",
         multi_dump=True,
     )
     return source, tmp_path / "clone"
@@ -1615,7 +1615,9 @@ update = true
 """
 
 
-def test_check_missing_lock_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_missing_lock_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """No lockfile -> usage error, exit code 2."""
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["check"])
@@ -1928,7 +1930,13 @@ def run_sync(
             new_fragments.append(frag)
             continue
         try:
-            rebuilt = _rerender(frag, sources[frag.source], clone_root_provider, lock_dir, dry_run=dry_run)
+            rebuilt = _rerender(
+                frag,
+                sources[frag.source],
+                clone_root_provider,
+                lock_dir,
+                dry_run=dry_run,
+            )
         except CoboError:
             failed.append(frag.path)
             new_fragments.append(frag)
@@ -1936,7 +1944,9 @@ def run_sync(
         changed.append(frag.path)
         new_fragments.append(rebuilt)
     if changed and not dry_run:
-        write_lock(lock_path, Lockfile(version=lock.version, fragments=tuple(new_fragments)))
+        write_lock(
+            lock_path, Lockfile(version=lock.version, fragments=tuple(new_fragments))
+        )
     return SyncResult(changed=tuple(changed), failed=tuple(failed), check=result)
 
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import platform
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -10,14 +12,14 @@ from rich.console import Console
 from rich.table import Table
 
 from cobo import __version__
+from cobo.commands.check import CheckResult, run_check
 from cobo.errors import GitError
+from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
 from cobo.sources.repo import clone_or_pull
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from cobo.config.schema import CoboConfig
+    from cobo.config.schema import CoboConfig, Source
 
 _console = Console()
 
@@ -43,6 +45,7 @@ def attach_globals(
     _register_root(app, cache_root=cache_root)
     _register_config(app, config=config)
     _register_config_path(app, user_config_file=user_config_file)
+    _register_check(app, config=config)
 
 
 def _register_version(app: typer.Typer) -> None:
@@ -132,3 +135,81 @@ def _register_config_path(app: typer.Typer, *, user_config_file: Path) -> None:
     def config_path_cmd() -> None:
         """Print the user config file path (whether it exists or not)."""
         typer.echo(str(user_config_file))
+
+
+def _clone_root_provider(source: Source) -> Path:
+    """Map a source to its cache clone path.
+
+    Returns:
+        The clone root directory for the source.
+    """
+    return source_clone_root(source.name)
+
+
+def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
+    @app.command()
+    def check(
+        json_output: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--json",
+            help="Emit machine-readable JSON.",
+        ),
+    ) -> None:
+        """Report fragments whose origin has drifted from the lockfile.
+
+        Raises:
+            Exit: Code 2 when no cobo.lock is found; code 1 when updates are
+                available; code 0 when everything is up to date.
+        """
+        lock_path = find_lock(Path.cwd())
+        if lock_path is None:
+            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
+            raise typer.Exit(2)
+        result = run_check(read_lock(lock_path), config.sources, _clone_root_provider)
+        if json_output:
+            typer.echo(json.dumps(_result_to_dict(result)))
+        else:
+            _print_check_table(result)
+        raise typer.Exit(1 if result.outdated_count else 0)
+
+
+def _result_to_dict(result: CheckResult) -> dict[str, object]:
+    """Convert a CheckResult to a JSON-serializable dict.
+
+    Returns:
+        A dict with ``outdated_count`` and a ``fragments`` array.
+    """
+    return {
+        "outdated_count": result.outdated_count,
+        "fragments": [
+            {
+                "path": r.path,
+                "source": r.source,
+                "held": r.held,
+                "outdated": r.outdated,
+                "error": r.error,
+                "files": [
+                    {"name": d.name, "old_blob": d.old_blob, "new_blob": d.new_blob}
+                    for d in r.drifts
+                ],
+            }
+            for r in result.reports
+        ],
+    }
+
+
+def _print_check_table(result: CheckResult) -> None:
+    """Print a Rich table summarizing the check result."""
+    table = Table("Fragment", "Source", "Status")
+    for r in result.reports:
+        if r.error is not None:
+            status = f"error: {r.error}"
+        elif r.held:
+            status = "held"
+        elif r.outdated:
+            status = f"outdated ({len(r.drifts)} file(s))"
+        else:
+            status = "up to date"
+        table.add_row(r.path, r.source, status)
+    _console.print(table)
+    _console.print(f"{result.outdated_count} fragment(s) need updating.")

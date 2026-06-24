@@ -415,3 +415,32 @@ def test_sync_isolates_write_failure(tmp_path: Path) -> None:
     )
     assert result.changed == ()
     assert result.failed == (".gitignore",)
+
+
+def test_check_without_refresh_uses_existing_clone(tmp_path: Path) -> None:
+    """run_check(refresh=False) reads the existing clone without re-pulling."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    result = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        refresh=False,
+    )
+    assert result.outdated_count == 0
+
+
+def test_dump_out_without_lock_writes_file_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --out FILE` (no --lock) writes the file and records nothing."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.read_text(encoding="utf-8") == "*.pyc\n"
+    assert not (tmp_path / "cobo.lock").exists()

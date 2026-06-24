@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import io
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 import typer
+from rich.console import Console
 from typer.testing import CliRunner
 
 from cobo import globals as cobo_globals
-from cobo.commands.check import CheckResult
+from cobo.commands.check import CheckResult, FragmentReport
 from cobo.commands.sync import SyncResult
 from cobo.config.schema import CoboConfig, Source
 from cobo.errors import GitError
 from cobo.globals import attach_globals
+from cobo.lock.diff import FileDrift
+from cobo.paths import source_clone_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -186,3 +190,34 @@ def test_sync_reports_failed_paths_and_exits_1(
     )
     result = runner.invoke(app_with_globals(tmp_path), ["sync"])
     assert result.exit_code == 1, result.output
+
+
+def test_clone_root_provider_maps_source_to_cache_path() -> None:
+    """_clone_root_provider returns the cache clone root for the source name."""
+    source = Source(name="gi", url="https://github.com/x/y", extension=".gitignore")
+    assert cobo_globals._clone_root_provider(source) == source_clone_root("gi")  # noqa: SLF001
+
+
+def test_print_check_table_renders_all_status_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_print_check_table renders error/held/outdated/up-to-date rows."""
+    buf = io.StringIO()
+    monkeypatch.setattr(cobo_globals, "_console", Console(file=buf, width=200))
+    reports = (
+        FragmentReport(
+            path="a.txt",
+            source="s",
+            held=False,
+            drifts=(FileDrift(name="n", path="p", old_blob="o", new_blob="x"),),
+        ),
+        FragmentReport(path="b.txt", source="s", held=True, drifts=()),
+        FragmentReport(path="c.txt", source="s", held=False, drifts=(), error="boom"),
+        FragmentReport(path="d.txt", source="s", held=False, drifts=()),
+    )
+    cobo_globals._print_check_table(CheckResult(reports))  # noqa: SLF001
+    out = buf.getvalue()
+    assert "outdated" in out
+    assert "up to date" in out
+    assert "held" in out
+    assert "boom" in out

@@ -1,0 +1,256 @@
+# Keeping fragments up to date
+
+cobo can track the boilerplates it dumps and alert you — or automatically update
+them — when the upstream template changes. The mechanism mirrors Dependabot and
+Renovate: pin a version, detect drift, open a PR.
+
+## Overview
+
+When you dump a boilerplate with `--lock`, cobo writes (or updates) a `cobo.lock`
+file next to your output file. The lockfile records which source file was rendered
+and a content-addressed blob SHA. Later, `cobo check` compares the stored blobs
+against the current upstream blobs and reports any that have drifted. `cobo sync`
+re-renders and re-pins the outdated fragments in one step.
+
+---
+
+## Recording a dump
+
+Pass `--out <FILE>` to write to a file instead of stdout, and add `--lock` to
+record the dump in `cobo.lock`:
+
+```sh
+cobo gitignore dump Python Node --out .gitignore --lock
+```
+
+cobo renders `.gitignore` from the `Python` and `Node` templates, writes it, and
+creates or updates `cobo.lock` in the current directory.
+
+> `--lock` requires `--out`. Using `--lock` without `--out` exits with code 2 and
+> prints an error — there is no path to track when writing to stdout.
+
+Run the same command again after `cobo gitignore update` to refresh the pin.
+
+---
+
+## The cobo.lock format
+
+`cobo.lock` is a TOML file, version-controlled alongside your project. It has one
+`[[fragment]]` block per tracked output file.
+
+### Example
+
+```toml
+version = 1
+
+[[fragment]]
+path = ".gitignore"
+source = "gitignore"
+update = true
+
+  [[fragment.files]]
+  name = "Python"
+  path = "Python.gitignore"
+  commit = "576334520435382d6522f349b9d270eda1e79a25"
+  blob = "b3ec7d5a8e3c2f1d9e4a0b7c6f2e1d8a9b4c3e2f"
+
+  [[fragment.files]]
+  name = "Node"
+  path = "Node.gitignore"
+  commit = "576334520435382d6522f349b9d270eda1e79a25"
+  blob = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
+
+[[fragment]]
+path = "mise.toml"
+source = "mise"
+update = false
+
+  [[fragment.files]]
+  name = "python"
+  path = "python.mise.toml"
+  commit = "def56789ab12345678901234567890abcdef1234"
+  blob = "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
+```
+
+### Field reference
+
+| Field | Level | Description |
+|---|---|---|
+| `version` | top-level | Lockfile schema version. Currently always `1`. |
+| `[[fragment]]` | per output file | One block per tracked file. |
+| `path` | fragment | Output file path, relative to the lockfile's location. |
+| `source` | fragment | The cobo source name (`gitignore`, `mise`, etc.). |
+| `update` | fragment | `true` (default) — check/sync consider this fragment. `false` — held back; check and sync skip it. |
+| `[[fragment.files]]` | per input file | One block per input boilerplate that contributed to the output (multi-dump may have several). |
+| `name` | files | Boilerplate name as passed to `dump` (e.g. `"Python"`). |
+| `path` | files | Repo-relative POSIX path inside the source clone (e.g. `"Python.gitignore"`). Used to build the provenance URL. |
+| `commit` | files | Full 40-character SHA the file was rendered from. Used for the provenance header URL. |
+| `blob` | files | Blob SHA at that commit (`git rev-parse HEAD:<path>`). This is the **drift key**: it is content-addressed and works on cobo's shallow clones. When the blob changes, the file has changed. |
+
+**`commit` vs `blob`:** `commit` is provenance — it identifies the exact upstream
+state the file came from and appears in the header URL. `blob` is the drift key —
+`cobo check` compares stored blob SHAs against current upstream blob SHAs; a
+mismatch means the template content has changed. Storing the blob SHA (rather than
+comparing commit history) is essential because cobo uses shallow clones, where `git
+log` history is not available.
+
+---
+
+## Checking for updates
+
+```sh
+cobo check
+```
+
+Reads `cobo.lock`, refreshes each source clone, then compares stored blob SHAs
+against the current upstream blob SHAs. Prints a Rich table with one row per
+tracked fragment showing its status: **up to date**, **outdated**, **held**, or
+**error**.
+
+For machine-readable output (e.g. in CI scripts):
+
+```sh
+cobo check --json
+```
+
+Emits JSON to stdout:
+
+```json
+{
+  "outdated_count": 1,
+  "fragments": [
+    {
+      "path": ".gitignore",
+      "source": "gitignore",
+      "held": false,
+      "outdated": true,
+      "error": null,
+      "files": [
+        {"name": "Python", "old_blob": "b3ec7d5...", "new_blob": "c4fd8e6..."}
+      ]
+    }
+  ]
+}
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | All tracked fragments are up to date. |
+| `1` | One or more fragments have updates available. |
+| `2` | No `cobo.lock` found. Run `cobo <source> dump --lock` first. |
+
+---
+
+## Applying updates
+
+```sh
+cobo sync
+```
+
+Re-renders every outdated fragment from the current source clone, writes the
+updated files, and advances their `commit` and `blob` entries in `cobo.lock`.
+Held fragments (`update = false`) are skipped. If one fragment fails (e.g. a
+source path has moved), the error is reported and sync continues with the
+remaining fragments.
+
+To preview what would change without writing anything:
+
+```sh
+cobo sync --dry-run
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | All fragments were applied (or there was nothing to do). |
+| `1` | One or more fragments failed to re-render. |
+| `2` | No `cobo.lock` found. Run `cobo <source> dump --lock` first. |
+
+> `cobo sync` does **not** exit 1 merely because updates existed — exit 1 means a
+> re-render actually failed. A clean sync with changes applied exits 0.
+
+After running `cobo sync`, commit both the updated output files and the updated
+`cobo.lock`.
+
+---
+
+## Holding a fragment back
+
+Set `update = false` on a fragment's `[[fragment]]` entry in `cobo.lock`:
+
+```toml
+[[fragment]]
+path = "mise.toml"
+source = "mise"
+update = false
+```
+
+`cobo check` lists this fragment as **held** and never counts it as outdated.
+`cobo sync` skips it entirely. To resume tracking, change `update` back to `true`
+(or remove the field — it defaults to `true`).
+
+---
+
+## Provenance header
+
+When a source has `inject_header = true`, cobo prepends a two-line provenance
+header to each dumped file:
+
+```
+# Generated by cobo (github.com/hasansezertasan/cobo)
+# gitignore/Python@5763345 — https://raw.githubusercontent.com/github/gitignore/576334520435382d6522f349b9d270eda1e79a25/Python.gitignore
+```
+
+- **Line 1** is a fixed attribution.
+- **Line 2** is `<source>/<name>@<short7>` followed by a raw URL built from the
+  **full 40-character SHA** and the resolved repo-relative path. The short SHA
+  (`@5763345`) is for human readability; the URL uses the full SHA to avoid
+  ambiguity as the upstream repo grows. The URL is omitted for non-GitHub sources.
+
+For `multi_dump`, one provenance line precedes each input template's block.
+
+---
+
+## Automating with GitHub Actions
+
+The `hasansezertasan/cobo` composite Action runs `cobo sync` and opens a pull
+request when fragments drift. Add a consuming workflow to your repository:
+
+```yaml
+# .github/workflows/cobo.yml
+name: cobo
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hasansezertasan/cobo@v1
+        with:
+          pr-title: "chore: update cobo fragments"
+```
+
+The `actions/checkout` step must come before the cobo action. The workflow needs
+`contents: write` (to push the update branch) and `pull-requests: write` (to open
+the PR).
+
+### Action inputs
+
+| Input | Default | Description |
+|---|---|---|
+| `config` | _(empty)_ | Path to a cobo config TOML. Sets `COBO_CONFIG`. Optional. |
+| `pr-title` | `"chore: update cobo fragments"` | Title for the opened pull request. |
+| `pr-labels` | `"cobo"` | Comma-separated labels for the pull request. |
+| `branch` | `"cobo/update-fragments"` | Branch the action pushes updates to. |
+
+The action uses `peter-evans/create-pull-request` under the hood, so no PR is
+opened when there are no changes.

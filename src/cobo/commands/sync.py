@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from cobo.commands.check import run_check
-from cobo.errors import CoboError
+from cobo.errors import GitError, UserError
 from cobo.lock.io import write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
 from cobo.sources.render import dump_locked as render_dump_locked
@@ -103,7 +103,7 @@ def run_sync(  # noqa: C901,PLR0913
                 lock_dir,
                 dry_run=dry_run,
             )
-        except (CoboError, OSError) as exc:
+        except (UserError, GitError, OSError) as exc:
             failed.append(FailedFragment(path=frag.path, reason=str(exc)))
             new_fragments.append(frag)
             continue
@@ -127,9 +127,12 @@ def _rerender(
 ) -> Fragment:
     """Re-render one fragment's output and return its advanced lock entry.
 
-    Propagates ``CoboError`` or ``OSError`` from ``render_dump_locked``,
-    ``blob_sha_for_path``, or the file write when a file has been removed
-    upstream, the clone is unreadable, or the output path is unwritable.
+    Propagates ``UserError``, ``GitError`` (including ``FileAbsentError``), or
+    ``OSError`` from ``render_dump_locked``, ``blob_sha_for_path``, or the file
+    write when a file has been removed upstream, the clone is unreadable, or the
+    output path is unwritable. An unexpected ``CoboError`` subtype is *not*
+    caught here, so a genuine defect surfaces rather than being absorbed into a
+    per-fragment failure.
 
     Returns:
         The fragment with each file's commit/blob refreshed to the clone HEAD.

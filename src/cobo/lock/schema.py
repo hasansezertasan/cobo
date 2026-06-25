@@ -11,6 +11,20 @@ from dataclasses import dataclass, field
 _SHA_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
+def _validate_repo_rel_path(path: str) -> None:
+    """Reject an empty, absolute, or non-POSIX (backslash) repo-relative path.
+
+    Raises:
+        ValueError: When ``path`` is empty, absolute, or contains a backslash.
+    """
+    if not path:
+        msg = "LockedFile.path must be non-empty"
+        raise ValueError(msg)
+    if path.startswith("/") or "\\" in path:
+        msg = f"LockedFile.path must be a repo-relative POSIX path, got {path!r}"
+        raise ValueError(msg)
+
+
 @dataclass(frozen=True, slots=True)
 class LockedFile:
     """One input file that contributed to a dumped fragment.
@@ -31,15 +45,14 @@ class LockedFile:
         """Validate field non-emptiness and SHA format at construction.
 
         Raises:
-            ValueError: When ``name``/``path`` are empty or ``commit``/``blob``
-                are not full hex SHAs.
+            ValueError: When ``name``/``path`` are empty, ``path`` is not a
+                repo-relative POSIX path, or ``commit``/``blob`` are not full
+                hex SHAs.
         """
         if not self.name:
             msg = "LockedFile.name must be non-empty"
             raise ValueError(msg)
-        if not self.path:
-            msg = "LockedFile.path must be non-empty"
-            raise ValueError(msg)
+        _validate_repo_rel_path(self.path)
         for label, sha in (("commit", self.commit), ("blob", self.blob)):
             if not _SHA_RE.fullmatch(sha):
                 msg = f"LockedFile.{label} must be a full hex SHA, got {sha!r}"
@@ -66,8 +79,9 @@ class Fragment:
         """Reject empty path/source and fragments that track no input files.
 
         Raises:
-            ValueError: When ``path``/``source`` are empty or ``files`` is empty
-                (a fragment with no inputs would render nothing).
+            ValueError: When ``path``/``source`` are empty, ``files`` is empty
+                (a fragment with no inputs would render nothing), or two files
+                share the same ``path``.
         """
         if not self.path:
             msg = "Fragment.path must be non-empty"
@@ -77,6 +91,11 @@ class Fragment:
             raise ValueError(msg)
         if not self.files:
             msg = f"Fragment {self.path!r} must track at least one file"
+            raise ValueError(msg)
+        file_paths = [f.path for f in self.files]
+        if len(set(file_paths)) != len(file_paths):
+            dupes = sorted({p for p in file_paths if file_paths.count(p) > 1})
+            msg = f"Fragment {self.path!r} has duplicate file paths: {dupes}"
             raise ValueError(msg)
 
 
@@ -93,12 +112,20 @@ class Lockfile:
     fragments: tuple[Fragment, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        """Reject a version below 1 (the exact gate lives in read_lock).
+        """Reject a version below 1 and duplicate fragment paths.
 
         Raises:
-            ValueError: When ``version`` is below 1. The exact supported version
-                is enforced separately on the read path (see ``read_lock``).
+            ValueError: When ``version`` is below 1, or two fragments share the
+                same ``path`` (the output path is the fragment's primary key, as
+                relied on by ``upsert_fragment`` and check/sync lookups). The
+                exact supported version is enforced separately on the read path
+                (see ``read_lock``).
         """
         if self.version < 1:
             msg = f"Lockfile.version must be >= 1, got {self.version}"
+            raise ValueError(msg)
+        paths = [f.path for f in self.fragments]
+        if len(set(paths)) != len(paths):
+            dupes = sorted({p for p in paths if paths.count(p) > 1})
+            msg = f"duplicate fragment paths in lockfile: {dupes}"
             raise ValueError(msg)

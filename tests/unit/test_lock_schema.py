@@ -81,3 +81,24 @@ def test_lockfile_rejects_version_below_one() -> None:
     """A version below 1 is rejected."""
     with pytest.raises(ValueError, match="version"):
         Lockfile(version=0, fragments=())
+
+
+@pytest.mark.parametrize("bad", ["/abs/Python.gitignore", "a\\b.gitignore"])
+def test_locked_file_rejects_non_posix_path(bad: str) -> None:
+    """Absolute or backslash paths are not repo-relative POSIX and are rejected."""
+    with pytest.raises(ValueError, match="POSIX"):
+        LockedFile(name="Python", path=bad, commit="a" * 40, blob="b" * 40)
+
+
+def test_fragment_rejects_duplicate_file_paths() -> None:
+    """Two files sharing a path within one fragment is rejected."""
+    dupe = _file()
+    with pytest.raises(ValueError, match="duplicate file paths"):
+        Fragment(path=".gitignore", source="gitignore", files=(dupe, dupe))
+
+
+def test_lockfile_rejects_duplicate_fragment_paths() -> None:
+    """Two fragments sharing an output path (the primary key) is rejected."""
+    frag = Fragment(path=".gitignore", source="gitignore", files=(_file(),))
+    with pytest.raises(ValueError, match="duplicate fragment paths"):
+        Lockfile(version=1, fragments=(frag, frag))

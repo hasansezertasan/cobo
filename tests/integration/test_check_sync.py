@@ -341,6 +341,97 @@ def test_sync_isolates_failed_fragment(tmp_path: Path) -> None:
     assert result.failed[0].reason  # the cause is captured, not discarded
 
 
+def test_sync_isolates_one_fragment_advances_sibling(tmp_path: Path) -> None:
+    """One failing fragment is isolated while a healthy sibling still syncs.
+
+    Guards the per-fragment isolation loop: the survivor's output is rewritten
+    and its lock entry advanced, while the failed fragment keeps its old entry.
+    """
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    # Record two fragments: ".gitignore" (Python) and "node.gitignore" (Node).
+    py_lock = tmp_path / "cobo.lock"
+    record_dump(
+        source=source,
+        clone_root=clone,
+        names=["Python"],
+        out_path=tmp_path / ".gitignore",
+        lock_path=py_lock,
+        commit_sha=current_commit_sha(clone),
+    )
+    record_dump(
+        source=source,
+        clone_root=clone,
+        names=["Node"],
+        out_path=tmp_path / "node.gitignore",
+        lock_path=py_lock,
+        commit_sha=current_commit_sha(clone),
+    )
+    old_node_blob = next(
+        f.files[0].blob
+        for f in read_lock(py_lock).fragments
+        if f.path == "node.gitignore"
+    )
+    # Both drift, but Python's tracked file is deleted upstream (un-syncable).
+    advance_source(tmp_path, "Node.gitignore", "node_modules/\ndist/\n")
+    delete_from_source(tmp_path, "Python.gitignore")
+
+    result = run_sync(
+        read_lock(py_lock),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=py_lock,
+    )
+
+    assert result.changed == ("node.gitignore",)
+    assert tuple(f.path for f in result.failed) == (".gitignore",)
+    lock = read_lock(py_lock)
+    node = next(f for f in lock.fragments if f.path == "node.gitignore")
+    py = next(f for f in lock.fragments if f.path == ".gitignore")
+    assert node.files[0].blob != old_node_blob  # survivor advanced
+    assert py.files[0].path == "Python.gitignore"  # failed entry untouched
+    assert (tmp_path / "node.gitignore").read_text(
+        encoding="utf-8"
+    ) == "node_modules/\ndist/\n"
+
+
+def test_sync_rerenders_multi_file_fragment_on_partial_drift(tmp_path: Path) -> None:
+    """A fragment of several files re-renders fully when only one file drifts."""
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    # One fragment concatenating two input files.
+    lock_path = _record(tmp_path, source, clone, ["Python", "Node"])
+    frag = read_lock(lock_path).fragments[0]
+    assert tuple(f.path for f in frag.files) == ("Python.gitignore", "Node.gitignore")
+    py_blob = frag.files[0].blob
+    node_blob = frag.files[1].blob
+    # Only the Node input drifts upstream.
+    advance_source(tmp_path, "Node.gitignore", "node_modules/\ndist/\n")
+
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+
+    assert result.changed == (".gitignore",)
+    out = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "*.pyc" in out  # unchanged input still rendered
+    assert "dist/" in out  # drifted input picked up
+    new_files = read_lock(lock_path).fragments[0].files
+    assert new_files[0].blob == py_blob  # unchanged file keeps its blob
+    assert new_files[1].blob != node_blob  # drifted file advanced
+
+
 def test_record_dump_preserves_held_flag(tmp_path: Path) -> None:
     """Re-recording a held (update=false) fragment must keep it held."""
     source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})

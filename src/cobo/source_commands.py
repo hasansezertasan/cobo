@@ -133,8 +133,12 @@ def _register_dump(  # noqa: C901
         if out is None:
             typer.echo(content, nl=False)
             return
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(content.encode("utf-8"))
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(content.encode("utf-8"))
+        except OSError as exc:
+            typer.echo(f"Could not write {out}: {exc}", err=True)
+            raise typer.Exit(1) from exc
         if lock:
             try:
                 record_dump(
@@ -145,7 +149,7 @@ def _register_dump(  # noqa: C901
                     lock_path=resolve_lock_path(Path.cwd()),
                     commit_sha=commit_sha,
                 )
-            except UserError as exc:
+            except (UserError, GitError) as exc:
                 typer.echo(str(exc), err=True)
                 raise typer.Exit(1) from exc
 

@@ -106,7 +106,8 @@ def build_header(source: Source, repo_rel_path: str, commit_sha: str) -> str:
     omitted for non-GitHub sources.
 
     Returns:
-        A two-line (or, for non-GitHub sources, attribution + token) header.
+        Always two lines: the attribution line, then the ``source/name@short``
+        token (with the raw URL appended for GitHub sources).
     """
     short = commit_sha[:_SHORT_SHA_LEN]
     name = _stem(repo_rel_path, source.extension)

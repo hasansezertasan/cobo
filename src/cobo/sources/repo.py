@@ -101,11 +101,13 @@ def blob_sha_for_path(clone_root: Path, repo_path: str) -> str:
         repo_path: Repo-relative POSIX path of the file at HEAD.
 
     Returns:
-        The 40-character blob SHA.
+        The full hex blob SHA (40 chars for SHA-1 repos, 64 for SHA-256).
 
     Raises:
         FileAbsentError: When ``repo_path`` does not exist at HEAD (the file was
-            removed upstream) — a legitimate drift signal.
+            removed upstream) — a legitimate drift signal. Note this is a
+            subclass of ``GitError``, so callers that need to treat absence
+            differently must catch ``FileAbsentError`` *before* ``GitError``.
         GitError: When the clone itself is invalid or missing (an infrastructure
             failure, not a deletion).
     """

@@ -7,17 +7,21 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
+from cobo import globals as cobo_globals
 from cobo.commands import record as record_module
+from cobo.commands import sync as sync_module
 from cobo.commands.check import run_check
 from cobo.commands.lock_import import run_import
 from cobo.commands.record import record_dump
 from cobo.commands.sync import run_sync
-from cobo.config.schema import Source
+from cobo.config.schema import CoboConfig, Source
 from cobo.errors import UserError
+from cobo.globals import attach_globals
 from cobo.lock.io import read_lock, write_lock
-from cobo.lock.schema import Fragment, LockedFile, Lockfile
+from cobo.lock.schema import Fragment, LockedFile, Lockfile, is_full_sha
 from cobo.source_commands import build_source_subapp
 from cobo.sources.render import dump as render_dump
 from cobo.sources.repo import clone_or_pull, current_commit_sha
@@ -109,7 +113,8 @@ def test_record_dump_writes_lock_entry(tmp_path: Path) -> None:
     assert frag.source == "gi"
     assert frag.files[0].name == "Python"
     assert frag.files[0].path == "Python.gitignore"
-    assert len(frag.files[0].blob) == 40  # noqa: PLR2004
+    # Content-addressed drift key; SHA-1 (40) or SHA-256 (64), not a fixed width.
+    assert is_full_sha(frag.files[0].blob)
 
 
 def test_dump_lock_without_out_exits_2(
@@ -804,3 +809,126 @@ def test_dump_out_without_lock_writes_file_only(
     assert result.exit_code == 0, result.output
     assert out.read_text(encoding="utf-8") == "*.pyc\n"
     assert not (tmp_path / "cobo.lock").exists()
+
+
+def test_check_refresh_picks_up_upstream_change(tmp_path: Path) -> None:
+    """run_check(refresh=True) re-pulls the clone, so it detects drift itself.
+
+    Pairs with test_check_without_refresh_uses_existing_clone: the *same* setup
+    reports clean without a refresh but outdated with one — proving the refresh
+    is what surfaces the drift (the central `cobo check` flow in CI).
+    """
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    # Without a refresh the stale clone still matches the lock.
+    stale = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        refresh=False,
+    )
+    assert stale.outdated_count == 0
+    # With the default refresh, run_check pulls and then sees the drift.
+    refreshed = run_check(
+        read_lock(lock_path), {source.name: source}, _provider_factory(clone)
+    )
+    assert refreshed.outdated_count == 1
+
+
+def test_sync_lock_write_failure_raises_user_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the lock cannot be written after re-rendering, run_sync raises UserError.
+
+    The output file is already rewritten on disk; surfacing a UserError (instead
+    of a raw OSError traceback) lets the CLI report the partial state cleanly.
+    """
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        msg = "disk full"
+        raise OSError(msg)
+
+    monkeypatch.setattr(sync_module, "write_lock", _boom)
+    with pytest.raises(UserError, match="could not update"):
+        run_sync(
+            read_lock(lock_path),
+            {source.name: source},
+            _provider_factory(clone),
+            lock_dir=tmp_path,
+            lock_path=lock_path,
+        )
+    # The working tree was modified even though the lock did not advance.
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "*.pyc\n*.pyo\n"
+
+
+def _global_app(
+    source: Source, clone: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> typer.Typer:
+    """Build the real CLI app wired to a local source clone.
+
+    Returns:
+        A Typer app with global commands whose clone provider points at ``clone``.
+    """
+    monkeypatch.setattr(cobo_globals, "source_clone_root", lambda _name: clone)
+    app = typer.Typer()
+    attach_globals(
+        app,
+        config=CoboConfig(default_branch="main", sources={source.name: source}),
+        cache_root=tmp_path,
+        user_config_file=tmp_path / "config.toml",
+    )
+    return app
+
+
+def test_check_cli_real_drift_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: real upstream drift drives `cobo check` to exit code 1.
+
+    Joins the two halves the other tests cover separately — drift detection and
+    the exit-code mapping — through the actual CLI command.
+    """
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    _record(tmp_path, source, clone, ["Python"])
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(_global_app(source, clone, monkeypatch, tmp_path), ["check"])
+    assert result.exit_code == 1, result.output
+    assert "outdated" in result.output
+
+
+def test_sync_cli_real_drift_advances_and_exits_0(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: `cobo sync` re-renders a drifted fragment and exits 0."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    _record(tmp_path, source, clone, ["Python"])
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(_global_app(source, clone, monkeypatch, tmp_path), ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "updated: .gitignore" in result.output
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "*.pyc\n*.pyo\n"
+
+
+def test_dump_lock_with_malformed_existing_lock_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --lock` over a malformed cobo.lock exits 2 cleanly, not a traceback."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cobo.lock").write_text("this = is not (valid toml", encoding="utf-8")
+    out = tmp_path / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
+    assert result.exit_code == 2, result.output  # noqa: PLR2004
+    assert result.exception is None or isinstance(result.exception, SystemExit)

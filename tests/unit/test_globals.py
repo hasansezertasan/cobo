@@ -15,7 +15,7 @@ from cobo import globals as cobo_globals
 from cobo.commands.check import CheckResult, FragmentReport
 from cobo.commands.sync import FailedFragment, SyncResult
 from cobo.config.schema import CoboConfig, Source
-from cobo.errors import GitError
+from cobo.errors import ConfigError, GitError, UserError
 from cobo.globals import attach_globals
 from cobo.lock.diff import FileDrift
 from cobo.paths import source_clone_root
@@ -197,6 +197,65 @@ def test_sync_reports_failed_paths_and_exits_1(
     assert "failed: .gitignore: gone upstream" in result.output
 
 
+def test_sync_clean_run_exits_0(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo sync` with nothing changed and nothing failed exits 0 with a notice."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals, "run_sync", MagicMock(return_value=_make_sync_result())
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "All fragments up to date." in result.output
+
+
+def test_sync_partial_write_failure_exits_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A UserError from run_sync (outputs written, lock not) is a clean exit 1.
+
+    Guards the partial-write path: the working tree was modified but the lock
+    could not be advanced; the user must see a message, not a raw traceback.
+    """
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_sync",
+        MagicMock(side_effect=UserError("Re-rendered 1 fragment(s) but could not ...")),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 1, result.output
+    assert "could not" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_lock_import_malformed_lock_exits_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed cobo.lock surfaced during import is a global exit 2, not per-file.
+
+    Unlike a per-file fault (exit 1), a corrupt lockfile is one problem reported
+    once, matching `check`/`sync`.
+    """
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / ".gitignore"
+    target.write_text("*.pyc\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_import",
+        MagicMock(side_effect=ConfigError("Malformed lockfile cobo.lock")),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["lock", "import", str(target)])
+    assert result.exit_code == 2, result.output  # noqa: PLR2004
+    assert "Malformed lockfile" in result.output
+
+
 def test_check_outdated_exits_1(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -263,6 +322,30 @@ def test_fragment_report_rejects_error_with_drifts() -> None:
     drift = FileDrift(name="n", path="p", old_blob="o", new_blob="x")
     with pytest.raises(ValueError, match="errored"):
         FragmentReport(path="a", source="s", held=False, drifts=(drift,), error="boom")
+
+
+def test_fragment_report_rejects_empty_path() -> None:
+    """A report must carry a non-empty fragment path."""
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        FragmentReport(path="", source="s", held=False, drifts=())
+
+
+def test_fragment_report_rejects_empty_source() -> None:
+    """A report must carry a non-empty source name."""
+    with pytest.raises(ValueError, match="source must be non-empty"):
+        FragmentReport(path="a", source="", held=False, drifts=())
+
+
+def test_failed_fragment_rejects_empty_path() -> None:
+    """A failed fragment must name the path that failed."""
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        FailedFragment(path="", reason="boom")
+
+
+def test_failed_fragment_rejects_empty_reason() -> None:
+    """A failure with no captured cause is not actionable and is rejected."""
+    with pytest.raises(ValueError, match="reason must be non-empty"):
+        FailedFragment(path="a", reason="")
 
 
 def test_sync_result_rejects_changed_failed_overlap() -> None:

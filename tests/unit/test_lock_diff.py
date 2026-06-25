@@ -2,7 +2,7 @@
 
 import pytest
 
-from cobo.lock.diff import compute_fragment_drift
+from cobo.lock.diff import FileDrift, compute_fragment_drift
 from cobo.lock.schema import Fragment, LockedFile
 
 pytestmark = pytest.mark.unit
@@ -55,3 +55,9 @@ def test_missing_current_blob_is_drift_with_none() -> None:
     )
     assert len(drifts) == 1
     assert drifts[0].new_blob is None
+
+
+def test_file_drift_rejects_non_drift() -> None:
+    """A FileDrift whose old and new blobs are equal is not drift and is rejected."""
+    with pytest.raises(ValueError, match="old_blob != new_blob"):
+        FileDrift(name="Python", path="p", old_blob=_PY_BLOB, new_blob=_PY_BLOB)

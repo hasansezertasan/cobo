@@ -83,6 +83,16 @@ class CheckResult:
         """
         return sum(1 for r in self.reports if r.outdated)
 
+    @property
+    def error_count(self) -> int:
+        """Number of fragments that could not be evaluated.
+
+        Returns:
+            Count of reports carrying an error (e.g. unknown or unreachable
+            source). These are never counted as ``outdated``.
+        """
+        return sum(1 for r in self.reports if r.error is not None)
+
 
 def gather_current_blobs(
     fragment: Fragment, source: Source, clone_root: Path, *, refresh: bool

@@ -163,7 +163,8 @@ in the current working directory if none is found. Re-run after
 
 ```sh
 cobo check          # Rich table; exits 0 (clean), 1 (updates available), 2 (no lock)
-cobo check --json   # machine-readable JSON with outdated_count and fragments array
+cobo check --strict # also exit non-zero when a fragment errored (CI gate)
+cobo check --json   # machine-readable JSON with outdated_count, error_count, fragments
 ```
 
 **Apply updates:**

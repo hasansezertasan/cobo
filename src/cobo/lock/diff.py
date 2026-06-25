@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from cobo.lock.schema import Fragment
+    from cobo.lock.schema import BlobSha, Fragment
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,8 +24,8 @@ class FileDrift:
 
     name: str
     path: str
-    old_blob: str
-    new_blob: str | None
+    old_blob: BlobSha
+    new_blob: BlobSha | None
 
     def __post_init__(self) -> None:
         """Reject a non-drift: a FileDrift must record an actual change.
@@ -40,7 +40,7 @@ class FileDrift:
 
 
 def compute_fragment_drift(
-    fragment: Fragment, current_blobs: Mapping[str, str | None]
+    fragment: Fragment, current_blobs: Mapping[str, BlobSha | None]
 ) -> tuple[FileDrift, ...]:
     """Compare a fragment's locked blobs against current blobs.
 

@@ -10,6 +10,7 @@ import typer
 from cobo.commands.record import record_dump, resolve_lock_path
 from cobo.config.schema import Source
 from cobo.errors import ConfigError, GitError, UserError
+from cobo.exit_codes import ExitCode
 from cobo.sources.discover import list_boilerplates, search_boilerplates
 from cobo.sources.render import dump as render_dump
 from cobo.sources.repo import clone_or_pull, current_commit_sha
@@ -57,7 +58,7 @@ def _register_update(
             clone_or_pull(source, target)
         except GitError as exc:
             typer.echo(str(exc), err=True)
-            raise typer.Exit(2) from exc
+            raise typer.Exit(ExitCode.USAGE) from exc
         typer.echo(f"{source.name}: ok")
 
 
@@ -124,13 +125,13 @@ def _register_dump(  # noqa: C901
         _enforce_multi_dump(source, names)
         if lock and out is None:
             typer.echo("--lock requires --out (a file path to track).", err=True)
-            raise typer.Exit(2)
+            raise typer.Exit(ExitCode.USAGE)
         commit_sha = current_commit_sha(target)
         try:
             content = render_dump(source, target, names, commit_sha)
         except UserError as exc:
             typer.echo(str(exc), err=True)
-            raise typer.Exit(1) from exc
+            raise typer.Exit(ExitCode.FAILURE) from exc
         if out is None:
             typer.echo(content, nl=False)
             return
@@ -139,7 +140,7 @@ def _register_dump(  # noqa: C901
             out.write_bytes(content.encode("utf-8"))
         except OSError as exc:
             typer.echo(f"Could not write {out}: {exc}", err=True)
-            raise typer.Exit(1) from exc
+            raise typer.Exit(ExitCode.FAILURE) from exc
         if lock:
             try:
                 record_dump(
@@ -154,10 +155,12 @@ def _register_dump(  # noqa: C901
                 # A malformed pre-existing cobo.lock: exit 2, matching the
                 # clean error `cobo check`/`cobo sync` give for the same case.
                 typer.echo(str(exc), err=True)
-                raise typer.Exit(2) from exc
-            except (UserError, GitError) as exc:
+                raise typer.Exit(ExitCode.USAGE) from exc
+            except (UserError, GitError, OSError) as exc:
+                # OSError covers a lockfile write that fails on a full/read-only
+                # disk; map it to a clean exit instead of a raw traceback.
                 typer.echo(str(exc), err=True)
-                raise typer.Exit(1) from exc
+                raise typer.Exit(ExitCode.FAILURE) from exc
 
 
 def _register_root(
@@ -189,7 +192,7 @@ def _missing(source: Source) -> None:
         f" Run `cobo {source.name} update` first.",
         err=True,
     )
-    raise typer.Exit(1)
+    raise typer.Exit(ExitCode.FAILURE)
 
 
 def _enforce_multi_dump(source: Source, names: list[str]) -> None:
@@ -204,4 +207,4 @@ def _enforce_multi_dump(source: Source, names: list[str]) -> None:
             f"(set multi_dump=true to enable). Got {len(names)} names.",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(ExitCode.FAILURE)

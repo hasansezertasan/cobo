@@ -17,6 +17,7 @@ from cobo.commands.lock_import import run_import
 from cobo.commands.record import resolve_lock_path
 from cobo.commands.sync import run_sync
 from cobo.errors import ConfigError, GitError, UserError
+from cobo.exit_codes import ExitCode
 from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
 from cobo.sources.repo import clone_or_pull
@@ -170,7 +171,7 @@ def _load_lock_or_exit(lock_path: Path) -> Lockfile:
         return read_lock(lock_path)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from exc
+        raise typer.Exit(ExitCode.USAGE) from exc
 
 
 def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
@@ -203,7 +204,7 @@ def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
         lock_path = find_lock(Path.cwd())
         if lock_path is None:
             typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
-            raise typer.Exit(2)
+            raise typer.Exit(ExitCode.USAGE)
         result = run_check(
             _load_lock_or_exit(lock_path),
             config.sources,
@@ -214,8 +215,7 @@ def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
             typer.echo(json.dumps(_result_to_dict(result)))
         else:
             _print_check_table(result)
-        failed = result.outdated_count or (strict and result.error_count)
-        raise typer.Exit(1 if failed else 0)
+        raise typer.Exit(result.exit_code(strict=strict))
 
 
 def _result_to_dict(result: CheckResult) -> dict[str, object]:
@@ -295,7 +295,7 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
         lock_path = find_lock(Path.cwd())
         if lock_path is None:
             typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
-            raise typer.Exit(2)
+            raise typer.Exit(ExitCode.USAGE)
         try:
             result = run_sync(
                 _load_lock_or_exit(lock_path),
@@ -308,14 +308,14 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
             )
         except UserError as exc:
             typer.echo(str(exc), err=True)
-            raise typer.Exit(1) from exc
+            raise typer.Exit(ExitCode.FAILURE) from exc
         for path in result.changed:
             typer.echo(f"updated: {path}")
         for failure in result.failed:
             typer.echo(f"failed: {failure.path}: {failure.reason}", err=True)
         if not result.changed and not result.failed:
             typer.echo("All fragments up to date.")
-        raise typer.Exit(1 if result.failed else 0)
+        raise typer.Exit(result.exit_code)
 
 
 def _register_lock(app: typer.Typer, *, config: CoboConfig) -> None:
@@ -343,9 +343,9 @@ def _register_lock(app: typer.Typer, *, config: CoboConfig) -> None:
             )
         except ConfigError as exc:
             typer.echo(str(exc), err=True)
-            raise typer.Exit(2) from exc
+            raise typer.Exit(ExitCode.USAGE) from exc
         for imported in result.imported:
             typer.echo(f"imported: {imported.path} ({imported.count} file(s))")
         for failure in result.failed:
             typer.echo(f"failed: {failure.path}: {failure.reason}", err=True)
-        raise typer.Exit(1 if result.failed else 0)
+        raise typer.Exit(result.exit_code)

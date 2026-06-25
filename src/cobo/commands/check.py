@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cobo.errors import FileAbsentError, GitError
+from cobo.exit_codes import ExitCode
 from cobo.lock.diff import compute_fragment_drift
 from cobo.sources.repo import blob_sha_for_path, clone_or_pull
 
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
     from cobo.config.schema import Source
     from cobo.lock.diff import FileDrift
-    from cobo.lock.schema import Fragment, Lockfile
+    from cobo.lock.schema import BlobSha, Fragment, Lockfile
 
 CloneRootProvider = Callable[(["Source"], Path)]
 
@@ -126,10 +127,25 @@ class CheckResult:
         """
         return sum(1 for r in self.reports if r.error is not None)
 
+    def exit_code(self, *, strict: bool = False) -> ExitCode:
+        """Map this result to a process exit code.
+
+        Args:
+            strict: When True, an errored fragment (not just a drifted one)
+                also yields a failure code — the CI-gate behavior of ``--strict``.
+
+        Returns:
+            ``ExitCode.FAILURE`` when updates are available (or, under
+            ``strict``, when any fragment errored); ``ExitCode.OK`` otherwise.
+        """
+        if self.outdated_count or (strict and self.error_count):
+            return ExitCode.FAILURE
+        return ExitCode.OK
+
 
 def gather_current_blobs(
     fragment: Fragment, source: Source, clone_root: Path, *, refresh: bool
-) -> dict[str, str | None]:
+) -> dict[str, BlobSha | None]:
     """Resolve the current blob SHA for each of a fragment's files.
 
     Args:
@@ -150,7 +166,7 @@ def gather_current_blobs(
     """
     if refresh:
         clone_or_pull(source, clone_root)
-    blobs: dict[str, str | None] = {}
+    blobs: dict[str, BlobSha | None] = {}
     for file in fragment.files:
         try:
             blobs[file.path] = blob_sha_for_path(clone_root, file.path)

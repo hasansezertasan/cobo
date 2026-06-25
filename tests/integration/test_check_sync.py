@@ -932,3 +932,59 @@ def test_dump_lock_with_malformed_existing_lock_exits_2(
     result = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
     assert result.exit_code == 2, result.output  # noqa: PLR2004
     assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_sync_cli_dry_run_over_real_drift_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cobo sync --dry-run` over real drift exits 0 and writes nothing.
+
+    Guards the CLI dry-run path end-to-end: a regression that stopped threading
+    ``--dry-run`` into ``run_sync`` would advance the lock and rewrite the
+    output, which this catches by asserting both are byte-for-byte unchanged.
+    """
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    dumped = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
+    assert dumped.exit_code == 0, dumped.output
+    lock_path = tmp_path / "cobo.lock"
+    out_before = out.read_bytes()
+    lock_before = lock_path.read_bytes()
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    result = runner.invoke(
+        _global_app(source, clone, monkeypatch, tmp_path), ["sync", "--dry-run"]
+    )
+    assert result.exit_code == 0, result.output
+    assert out.read_bytes() == out_before
+    assert lock_path.read_bytes() == lock_before
+
+
+def test_check_multi_file_fragment_one_input_deleted_reports_drift(
+    tmp_path: Path,
+) -> None:
+    """A multi-file fragment with one input removed upstream drifts, not errors.
+
+    Exercises ``gather_current_blobs``' distinction: an absent path maps to None
+    (legitimate drift via ``FileAbsentError``) while the surviving file is
+    unaffected, so the fragment is ``outdated`` and never ``error``.
+    """
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    _record(tmp_path, source, clone, ["Python", "Node"])
+    delete_from_source(tmp_path, "Node.gitignore")
+    result = run_check(
+        read_lock(tmp_path / "cobo.lock"),
+        {source.name: source},
+        _provider_factory(clone),
+    )
+    report = result.reports[0]
+    assert report.error is None, report.error
+    assert report.outdated
+    assert {d.path for d in report.drifts} == {"Node.gitignore"}
+    assert report.drifts[0].new_blob is None

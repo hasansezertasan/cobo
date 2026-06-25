@@ -27,6 +27,17 @@ class FileDrift:
     old_blob: str
     new_blob: str | None
 
+    def __post_init__(self) -> None:
+        """Reject a non-drift: a FileDrift must record an actual change.
+
+        Raises:
+            ValueError: When ``old_blob`` equals ``new_blob`` (no drift), which
+                would otherwise be a constructible but meaningless instance.
+        """
+        if self.old_blob == self.new_blob:
+            msg = f"FileDrift {self.path!r} requires old_blob != new_blob"
+            raise ValueError(msg)
+
 
 def compute_fragment_drift(
     fragment: Fragment, current_blobs: Mapping[str, str | None]

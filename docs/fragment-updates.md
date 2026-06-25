@@ -114,7 +114,7 @@ update = false
 | `[[fragment.files]]` | per input file | One block per input boilerplate that contributed to the output (multi-dump may have several). |
 | `name` | files | Boilerplate name as passed to `dump` (e.g. `"Python"`). |
 | `path` | files | Repo-relative POSIX path inside the source clone (e.g. `"Python.gitignore"`). Used to build the provenance URL. |
-| `commit` | files | Full 40-character SHA the file was rendered from. Used for the provenance header URL. |
+| `commit` | files | Full hex SHA the file was rendered from (40 chars for SHA-1, 64 for SHA-256). Used for the provenance header URL. |
 | `blob` | files | Blob SHA at that commit (`git rev-parse HEAD:<path>`). This is the **drift key**: it is content-addressed and works on cobo's shallow clones. When the blob changes, the file has changed. |
 
 **`commit` vs `blob`:** `commit` is provenance — it identifies the exact upstream
@@ -266,7 +266,7 @@ header to each dumped file:
 
 - **Line 1** is a fixed attribution.
 - **Line 2** is `<source>/<name>@<short7>` followed by a raw URL built from the
-  **full 40-character SHA** and the resolved repo-relative path. The short SHA
+  **full SHA** and the resolved repo-relative path. The short SHA
   (`@5763345`) is for human readability; the URL uses the full SHA to avoid
   ambiguity as the upstream repo grows. The URL is omitted for non-GitHub sources.
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from git import GitCommandError, InvalidGitRepositoryError, NoSuchPathError, Repo
 
 from cobo.errors import ConfigError, FileAbsentError, GitError
+from cobo.lock.schema import BlobSha, CommitSha
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,7 +76,7 @@ def _pull(clone_root: Path, branch: str) -> None:
     repo.git.clean("-fdx")
 
 
-def current_commit_sha(clone_root: Path) -> str:
+def current_commit_sha(clone_root: Path) -> CommitSha:
     """Return HEAD's full SHA for an existing clone.
 
     Raises:
@@ -86,10 +87,10 @@ def current_commit_sha(clone_root: Path) -> str:
     except (InvalidGitRepositoryError, NoSuchPathError) as exc:
         msg = f"not a git repository: {clone_root}"
         raise GitError(msg) from exc
-    return repo.head.commit.hexsha
+    return CommitSha(repo.head.commit.hexsha)
 
 
-def blob_sha_for_path(clone_root: Path, repo_path: str) -> str:
+def blob_sha_for_path(clone_root: Path, repo_path: str) -> BlobSha:
     """Return the blob SHA of ``repo_path`` at the clone's HEAD.
 
     Uses ``git rev-parse HEAD:<path>``, which works on a shallow (depth-1)
@@ -117,7 +118,7 @@ def blob_sha_for_path(clone_root: Path, repo_path: str) -> str:
         msg = f"could not resolve blob for '{repo_path}' in {clone_root}: {exc}"
         raise GitError(msg) from exc
     try:
-        return str(repo.git.rev_parse(f"HEAD:{repo_path}"))
+        return BlobSha(str(repo.git.rev_parse(f"HEAD:{repo_path}")))
     except GitCommandError as exc:
         msg = f"path '{repo_path}' is absent at HEAD in {clone_root}: {exc}"
         raise FileAbsentError(msg) from exc

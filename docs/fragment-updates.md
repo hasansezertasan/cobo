@@ -122,6 +122,7 @@ Emits JSON to stdout:
 ```json
 {
   "outdated_count": 1,
+  "error_count": 0,
   "fragments": [
     {
       "path": ".gitignore",
@@ -142,13 +143,19 @@ Emits JSON to stdout:
 | Code | Meaning |
 |---|---|
 | `0` | All tracked fragments are up to date. |
-| `1` | One or more fragments have updates available. |
-| `2` | No `cobo.lock` found. Run `cobo <source> dump --lock` first. |
+| `1` | One or more fragments have updates available (or, with `--strict`, one or more fragments errored). |
+| `2` | No `cobo.lock` found or it is malformed. Run `cobo <source> dump --lock` first. |
 
 > Fragments that cannot be evaluated (e.g. their `source` is not configured) are
-> reported with an `error` status but are **not** counted as outdated — so `cobo
-> check` can exit 0 while `error` entries are still present in the output. Always
-> inspect the table (or `--json`) for `error` entries even on a clean exit.
+> reported with an `error` status but are **not** counted as outdated — so by
+> default `cobo check` can exit 0 while `error` entries are still present in the
+> output. Always inspect the table (or `--json`) for `error` entries even on a
+> clean exit.
+>
+> Pass `--strict` to make errored fragments cause a non-zero exit as well — use
+> this when running `cobo check` as a CI gate where an unreachable source should
+> fail the build rather than pass silently. The `--json` output always reports
+> `error_count` regardless of `--strict`.
 
 ---
 
@@ -181,8 +188,9 @@ cobo sync --dry-run
 > `cobo sync` does **not** exit 1 merely because updates existed — exit 1 means a
 > re-render actually failed. A clean sync with changes applied exits 0.
 >
-> Unlike `cobo check` (which exits 0 even when `error` entries are present), `cobo
-> sync` treats un-evaluable fragments as failures so CI and the Action fail loudly.
+> Unlike `cobo check` (which by default exits 0 even when `error` entries are
+> present — use `cobo check --strict` to change that), `cobo sync` always treats
+> un-evaluable fragments as failures so CI and the Action fail loudly.
 
 After running `cobo sync`, commit both the updated output files and the updated
 `cobo.lock`.

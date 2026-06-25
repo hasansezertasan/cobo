@@ -44,6 +44,28 @@ def test_check_missing_lock_exits_2(
     assert result.exit_code == _EXIT_NO_LOCK, result.output
 
 
+def test_check_malformed_lock_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed cobo.lock is a clean error (exit 2), not a raw traceback."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cobo.lock").write_text("this = is not (valid toml", encoding="utf-8")
+    result = runner.invoke(app, ["check"])
+    assert result.exit_code == _EXIT_NO_LOCK, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_sync_malformed_lock_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cobo sync` against a malformed lockfile exits 2 without crashing."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cobo.lock").write_text("this = is not (valid toml", encoding="utf-8")
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == _EXIT_NO_LOCK, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
 def test_check_unknown_source_reports_and_exits_0(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -53,6 +75,43 @@ def test_check_unknown_source_reports_and_exits_0(
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 0, result.output
     assert "does-not-exist" in result.output
+
+
+def test_check_finds_lock_from_subdirectory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cobo check` walks upward to find cobo.lock when run from a subdir."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_UNKNOWN_SOURCE, encoding="utf-8")
+    subdir = tmp_path / "nested" / "deep"
+    subdir.mkdir(parents=True)
+    monkeypatch.chdir(subdir)
+    result = runner.invoke(app, ["check"])
+    # Found the parent lock (else it would print the "No cobo.lock" message).
+    assert "No cobo.lock found" not in result.output
+    assert "does-not-exist" in result.output
+
+
+def test_check_strict_errors_exit_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--strict makes an errored fragment a non-zero exit (CI gate)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cobo.lock").write_text(_LOCK_UNKNOWN_SOURCE, encoding="utf-8")
+    result = runner.invoke(app, ["check", "--strict"])
+    assert result.exit_code == 1, result.output
+    assert "does-not-exist" in result.output
+
+
+def test_check_json_reports_error_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--json exposes error_count so machines can detect errors without --strict."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cobo.lock").write_text(_LOCK_UNKNOWN_SOURCE, encoding="utf-8")
+    result = runner.invoke(app, ["check", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["error_count"] == 1
 
 
 def test_check_json_emits_machine_readable(

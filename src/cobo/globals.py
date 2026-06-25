@@ -12,15 +12,16 @@ from rich.console import Console
 from rich.table import Table
 
 from cobo import __version__
-from cobo.commands.check import CheckResult, run_check
+from cobo.commands.check import CheckResult, FragmentReport, run_check
 from cobo.commands.sync import run_sync
-from cobo.errors import GitError
+from cobo.errors import ConfigError, GitError
 from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
 from cobo.sources.repo import clone_or_pull
 
 if TYPE_CHECKING:
     from cobo.config.schema import CoboConfig, Source
+    from cobo.lock.schema import Lockfile
 
 _console = Console()
 
@@ -148,6 +149,27 @@ def _clone_root_provider(source: Source) -> Path:
     return source_clone_root(source.name)
 
 
+def _load_lock_or_exit(lock_path: Path) -> Lockfile:
+    """Read a lockfile, exiting cleanly (code 2) if it is malformed.
+
+    Args:
+        lock_path: Path to the cobo.lock to parse.
+
+    Returns:
+        The parsed Lockfile.
+
+    Raises:
+        Exit: Code 2 with the underlying message when the lockfile is malformed
+            or its version is unsupported (a ``ConfigError``), so the user sees
+            a readable error rather than a raw traceback.
+    """
+    try:
+        return read_lock(lock_path)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
 def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
     @app.command()
     def check(
@@ -156,33 +178,44 @@ def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
             "--json",
             help="Emit machine-readable JSON.",
         ),
+        strict: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--strict",
+            help="Also exit non-zero when a fragment errored (e.g. its source "
+            "is unknown or unreachable). Useful as a CI gate.",
+        ),
     ) -> None:
         """Report fragments whose origin has drifted from the lockfile.
 
         Raises:
-            Exit: Code 2 when no cobo.lock is found; code 1 when updates are
-                available; code 0 when everything is up to date.
+            Exit: Code 2 when no cobo.lock is found or it is malformed; code 1
+                when updates are available (or, with --strict, when any fragment
+                errored); code 0 when everything is up to date.
         """
         lock_path = find_lock(Path.cwd())
         if lock_path is None:
             typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
             raise typer.Exit(2)
-        result = run_check(read_lock(lock_path), config.sources, _clone_root_provider)
+        result = run_check(
+            _load_lock_or_exit(lock_path), config.sources, _clone_root_provider
+        )
         if json_output:
             typer.echo(json.dumps(_result_to_dict(result)))
         else:
             _print_check_table(result)
-        raise typer.Exit(1 if result.outdated_count else 0)
+        failed = result.outdated_count or (strict and result.error_count)
+        raise typer.Exit(1 if failed else 0)
 
 
 def _result_to_dict(result: CheckResult) -> dict[str, object]:
     """Convert a CheckResult to a JSON-serializable dict.
 
     Returns:
-        A dict with ``outdated_count`` and a ``fragments`` array.
+        A dict with ``outdated_count``, ``error_count`` and a ``fragments`` array.
     """
     return {
         "outdated_count": result.outdated_count,
+        "error_count": result.error_count,
         "fragments": [
             {
                 "path": r.path,
@@ -200,21 +233,31 @@ def _result_to_dict(result: CheckResult) -> dict[str, object]:
     }
 
 
+def _status_label(report: FragmentReport) -> str:
+    """Return the human-readable status cell for one fragment report.
+
+    Returns:
+        One of: an error string, ``held``, ``outdated (N file(s))``, or
+        ``up to date``.
+    """
+    if report.error is not None:
+        return f"error: {report.error}"
+    if report.held:
+        return "held"
+    if report.outdated:
+        return f"outdated ({len(report.drifts)} file(s))"
+    return "up to date"
+
+
 def _print_check_table(result: CheckResult) -> None:
     """Print a Rich table summarizing the check result."""
     table = Table("Fragment", "Source", "Status")
     for r in result.reports:
-        if r.error is not None:
-            status = f"error: {r.error}"
-        elif r.held:
-            status = "held"
-        elif r.outdated:
-            status = f"outdated ({len(r.drifts)} file(s))"
-        else:
-            status = "up to date"
-        table.add_row(r.path, r.source, status)
+        table.add_row(r.path, r.source, _status_label(r))
     _console.print(table)
     _console.print(f"{result.outdated_count} fragment(s) need updating.")
+    if result.error_count:
+        _console.print(f"{result.error_count} fragment(s) could not be evaluated.")
 
 
 def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C901
@@ -229,15 +272,15 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
         """Re-render outdated fragments and open them for commit.
 
         Raises:
-            Exit: Code 2 when no cobo.lock is found; code 1 when any fragment
-                failed to re-render; code 0 otherwise.
+            Exit: Code 2 when no cobo.lock is found or it is malformed; code 1
+                when any fragment failed to re-render; code 0 otherwise.
         """
         lock_path = find_lock(Path.cwd())
         if lock_path is None:
             typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
             raise typer.Exit(2)
         result = run_sync(
-            read_lock(lock_path),
+            _load_lock_or_exit(lock_path),
             config.sources,
             _clone_root_provider,
             lock_dir=lock_path.parent,

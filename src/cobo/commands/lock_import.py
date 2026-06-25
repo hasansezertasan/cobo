@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from cobo.commands.record import record_dump
 from cobo.errors import GitError, UserError
+from cobo.exit_codes import ExitCode
 from cobo.sources.render import parse_provenance
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
@@ -30,6 +31,21 @@ class ImportedFile:
     path: str
     count: int
 
+    def __post_init__(self) -> None:
+        """Reject an empty path or a non-positive file count.
+
+        Raises:
+            ValueError: When ``path`` is empty or ``count`` is below 1 (an
+                import that recorded no input boilerplates is meaningless, the
+                same invariant ``Fragment`` enforces on its files).
+        """
+        if not self.path:
+            msg = "ImportedFile.path must be non-empty"
+            raise ValueError(msg)
+        if self.count < 1:
+            msg = f"ImportedFile.count must be >= 1, got {self.count}"
+            raise ValueError(msg)
+
 
 @dataclass(frozen=True, slots=True)
 class FailedImport:
@@ -43,6 +59,20 @@ class FailedImport:
     path: str
     reason: str
 
+    def __post_init__(self) -> None:
+        """Reject an empty path or reason.
+
+        Raises:
+            ValueError: When ``path`` or ``reason`` is empty (a failure with no
+                cause is not actionable).
+        """
+        if not self.path:
+            msg = "FailedImport.path must be non-empty"
+            raise ValueError(msg)
+        if not self.reason:
+            msg = "FailedImport.reason must be non-empty"
+            raise ValueError(msg)
+
 
 @dataclass(frozen=True, slots=True)
 class ImportResult:
@@ -55,6 +85,16 @@ class ImportResult:
 
     imported: tuple[ImportedFile, ...]
     failed: tuple[FailedImport, ...]
+
+    @property
+    def exit_code(self) -> ExitCode:
+        """Map this result to a process exit code.
+
+        Returns:
+            ``ExitCode.FAILURE`` when any file failed to import;
+            ``ExitCode.OK`` otherwise.
+        """
+        return ExitCode.FAILURE if self.failed else ExitCode.OK
 
 
 def run_import(

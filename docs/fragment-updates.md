@@ -59,7 +59,8 @@ Requirements and behavior:
   failure and skipped; the remaining files are still imported.
 - All header lines within one file must reference the same source.
 - An existing `update = false` hold-back on a re-imported fragment is preserved.
-- Exit `0` when every file imported, `1` when any file failed.
+- Exit `0` when every file imported, `1` when any file failed, `2` when an
+  existing `cobo.lock` is malformed (a single global error, not a per-file one).
 
 ---
 
@@ -270,7 +271,7 @@ header to each dumped file:
   (`@5763345`) is for human readability; the URL uses the full SHA to avoid
   ambiguity as the upstream repo grows. The URL is omitted for non-GitHub sources.
 
-For `multi_dump`, one provenance line precedes each input template's block.
+For `multi_dump`, one such two-line header precedes each input template's block.
 
 ---
 

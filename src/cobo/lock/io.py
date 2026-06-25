@@ -116,11 +116,20 @@ def write_lock(path: Path, lock: Lockfile) -> None:
 
     The document is written to a sibling temp file and renamed, so a crash
     mid-write never leaves a half-written cobo.lock.
+
+    Raises:
+        OSError: When the temp file cannot be written or renamed (e.g. a full
+            or read-only disk). The partial temp file is removed first so a
+            failed write does not leave a stray ``cobo.lock.tmp`` behind.
     """
     text = _serialize(lock)
     tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_text(text, encoding="utf-8", newline="\n")
-    tmp.replace(path)
+    try:
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _serialize(lock: Lockfile) -> str:

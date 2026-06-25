@@ -120,5 +120,14 @@ def blob_sha_for_path(clone_root: Path, repo_path: str) -> BlobSha:
     try:
         return BlobSha(str(repo.git.rev_parse(f"HEAD:{repo_path}")))
     except GitCommandError as exc:
-        msg = f"path '{repo_path}' is absent at HEAD in {clone_root}: {exc}"
-        raise FileAbsentError(msg) from exc
+        # Distinguish a genuinely missing path (legitimate drift) from any other
+        # rev-parse failure (a corrupt object, an ambiguous ref). git phrases the
+        # former as "does not exist in 'HEAD'" / "exists on disk, but not in";
+        # anything else is an infrastructure fault, surfaced as a plain GitError
+        # so it is not silently misread as a file removed upstream.
+        detail = f"{exc}".lower()
+        if "does not exist" in detail or "exists on disk, but not in" in detail:
+            msg = f"path '{repo_path}' is absent at HEAD in {clone_root}: {exc}"
+            raise FileAbsentError(msg) from exc
+        msg = f"could not resolve blob for '{repo_path}' in {clone_root}: {exc}"
+        raise GitError(msg) from exc

@@ -6,9 +6,11 @@ import subprocess  # noqa: S404
 from typing import TYPE_CHECKING
 
 import pytest
+from git import GitCommandError
 
 from cobo.config.schema import Source
 from cobo.errors import FileAbsentError, GitError
+from cobo.sources import repo as repo_module
 from cobo.sources.repo import blob_sha_for_path, clone_or_pull
 
 if TYPE_CHECKING:
@@ -89,4 +91,28 @@ def test_blob_sha_invalid_clone_raises_git_error(tmp_path: Path) -> None:
     not_a_repo.mkdir()
     with pytest.raises(GitError) as exc_info:
         blob_sha_for_path(not_a_repo, "Python.gitignore")
+    assert not isinstance(exc_info.value, FileAbsentError)
+
+
+def test_blob_sha_other_rev_parse_failure_raises_git_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-absence rev-parse failure surfaces as GitError, not FileAbsentError.
+
+    A corrupt object or ambiguous ref must not be misread as "file removed
+    upstream", which would register as phantom drift.
+    """
+
+    class _FakeGit:
+        @staticmethod
+        def rev_parse(_arg: str) -> str:
+            raise GitCommandError(["git", "rev-parse"], 128, b"fatal: bad object HEAD")
+
+    class _FakeRepo:
+        def __init__(self, _path: object) -> None:
+            self.git = _FakeGit()
+
+    monkeypatch.setattr(repo_module, "Repo", _FakeRepo)
+    with pytest.raises(GitError) as exc_info:
+        blob_sha_for_path(tmp_path, "hello.gitignore")
     assert not isinstance(exc_info.value, FileAbsentError)

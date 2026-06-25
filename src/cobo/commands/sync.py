@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from cobo.commands.check import run_check
 from cobo.errors import GitError, UserError
+from cobo.exit_codes import ExitCode
 from cobo.lock.io import write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
 from cobo.sources.render import dump_locked as render_dump_locked
@@ -71,6 +72,17 @@ class SyncResult:
         if overlap:
             msg = f"fragments cannot be both changed and failed: {sorted(overlap)}"
             raise ValueError(msg)
+
+    @property
+    def exit_code(self) -> ExitCode:
+        """Map this result to a process exit code.
+
+        Returns:
+            ``ExitCode.FAILURE`` when any fragment failed to re-render;
+            ``ExitCode.OK`` otherwise (including a clean sync that applied
+            updates — sync does not fail merely because work was done).
+        """
+        return ExitCode.FAILURE if self.failed else ExitCode.OK
 
 
 def run_sync(  # noqa: C901,PLR0913

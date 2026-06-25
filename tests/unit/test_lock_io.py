@@ -156,3 +156,11 @@ def test_string_values_are_escaped(tmp_path: Path) -> None:
     target = tmp_path / LOCK_FILENAME
     write_lock(target, Lockfile(version=1, fragments=(frag,)))
     assert read_lock(target) == Lockfile(version=1, fragments=(frag,))
+
+
+def test_write_lock_removes_temp_on_failure(tmp_path: Path) -> None:
+    """A failed write leaves no stray cobo.lock.tmp behind."""
+    target = tmp_path / "nonexistent-dir" / LOCK_FILENAME  # parent is missing
+    with pytest.raises(OSError):  # noqa: PT011
+        write_lock(target, empty_lock())
+    assert not target.with_name(f"{LOCK_FILENAME}.tmp").exists()

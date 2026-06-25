@@ -25,6 +25,11 @@ inputs:
     description: Branch the action pushes updates to.
     required: false
     default: cobo/update-fragments
+  fail-on-sync-error:
+    description: >-
+      When "true", fail the workflow run if any fragment failed to re-render. The PR for the fragments that did succeed is still opened first; the run fails afterward. Defaults to "false" (isolate failures and stay green, surfacing them only in the PR body and the sync_failed output).
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -65,10 +70,11 @@ runs:
         # Re-render outdated fragments. A non-zero exit means some fragment
         # failed to re-render; still open a PR for the ones that succeeded and
         # record the failure so it surfaces in the PR body instead of aborting.
-        # NOTE: this action intentionally exits 0 even when fragments fail, so a
+        # NOTE: this step intentionally exits 0 even when fragments fail, so a
         # partial update still opens a PR. The failure is reported in the PR body
-        # and via the `sync_failed` step output; a caller that must fail the run
-        # on a sync error should gate on that output.
+        # and via the `sync_failed` step output. Set `fail-on-sync-error: true`
+        # to fail the run afterward (the "Fail on sync error" step below), or
+        # gate on the `sync_failed` output in a downstream step.
         if "${cobo[@]}" sync "${exclude[@]}"; then
           echo "sync_failed=false" >> "$GITHUB_OUTPUT"
         else
@@ -108,3 +114,12 @@ runs:
         branch: ${{ inputs.branch }}
         body: ${{ steps.body.outputs.body }}
         commit-message: ${{ inputs.pr-title }}
+    # Runs last, so the PR for the successful fragments is already opened before
+    # the run is failed. Only fires when the caller opted in.
+    - name: Fail on sync error
+      if: ${{ inputs.fail-on-sync-error == 'true' && steps.sync.outputs.sync_failed == 'true' }}
+      shell: bash
+      run: |
+        echo "::error::One or more cobo fragments failed to re-render;" \
+          "failing the run as requested by fail-on-sync-error." >&2
+        exit 1

@@ -313,6 +313,7 @@ the PR).
 | `pr-title` | `"chore: update cobo fragments"` | Title for the opened pull request. |
 | `pr-labels` | `"cobo"` | Comma-separated labels for the pull request. |
 | `branch` | `"cobo/update-fragments"` | Branch the action pushes updates to. |
+| `fail-on-sync-error` | `"false"` | When `"true"`, fail the run if any fragment failed to re-render. The PR for the fragments that did succeed is still opened first; the run fails afterward. The default isolates failures and stays green, surfacing them only in the PR body and the `sync_failed` output. |
 
 The action uses `peter-evans/create-pull-request` under the hood, so no PR is
 opened when there are no changes.

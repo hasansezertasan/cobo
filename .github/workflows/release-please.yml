@@ -97,3 +97,47 @@ jobs:
             gh pr close "$pr" --delete-branch
           fi
           gh workflow run "${{ github.workflow }}" --ref "${{ github.ref_name }}"
+  publish-docker:
+    needs: [release-please, publish]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    name: Publish Docker image to GHCR
+    permissions:
+      contents: read
+      packages: write  # IMPORTANT: push the Docker-action image to GHCR
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push the Docker-action image
+        env:
+          # The image installs cobo from PyPI, so it can only build once the
+          # publish job above has uploaded this version — hence `needs: publish`.
+          VERSION: ${{ needs.release-please.outputs.version }}
+          IMAGE: ghcr.io/${{ github.repository }}
+          DOCKER_BUILDKIT: "1"
+        run: |
+          set -euo pipefail
+          major="${VERSION%%.*}"
+          # Retry to ride out PyPI index propagation right after publish: a fresh
+          # version can take a short while to become pip-installable.
+          for attempt in 1 2 3 4 5; do
+            if docker build \
+              --build-arg "COBO_VERSION=${VERSION}" \
+              --tag "${IMAGE}:${VERSION}" \
+              --tag "${IMAGE}:${major}" \
+              --tag "${IMAGE}:latest" \
+              --file docker/Dockerfile docker/; then
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "::error::docker build failed after 5 attempts" >&2
+              exit 1
+            fi
+            echo "Build failed (likely PyPI propagation lag); retrying in 30s…"
+            sleep 30
+          done
+          docker push "${IMAGE}:${VERSION}"
+          docker push "${IMAGE}:${major}"
+          docker push "${IMAGE}:latest"

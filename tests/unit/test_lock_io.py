@@ -80,6 +80,17 @@ def test_read_rejects_malformed_toml(tmp_path: Path) -> None:
         read_lock(target)
 
 
+def test_read_unreadable_lock_raises_config_error(tmp_path: Path) -> None:
+    """An OSError reading the lock (e.g. it is a directory) maps to ConfigError.
+
+    Guards against a raw traceback when the path exists but cannot be opened.
+    """
+    target = tmp_path / LOCK_FILENAME
+    target.mkdir()  # opening a directory as a file raises OSError
+    with pytest.raises(ConfigError, match="Could not read lockfile"):
+        read_lock(target)
+
+
 def test_upsert_replaces_existing_path() -> None:
     """upsert_fragment replaces a fragment with the same output path."""
     lock = empty_lock()

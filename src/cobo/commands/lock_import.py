@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cobo.commands.record import record_dump
-from cobo.errors import CoboError, UserError
+from cobo.errors import GitError, UserError
 from cobo.sources.render import parse_provenance
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
@@ -71,6 +71,10 @@ def run_import(
     rest still import. Recording adopts the current upstream HEAD (cobo's shallow
     clones cannot resurrect the originally pinned commit).
 
+    A ``ConfigError`` (a malformed existing cobo.lock) is *not* isolated per
+    file — it is a single global problem, so it propagates to the caller to be
+    reported once with exit 2, matching ``check``/``sync``.
+
     Args:
         files: Paths of previously dumped files to adopt.
         sources: Resolved sources keyed by name.
@@ -88,7 +92,7 @@ def run_import(
             count = _import_one(
                 file, sources, clone_root_provider, lock_path, refresh=refresh
             )
-        except (UserError, CoboError, OSError) as exc:
+        except (UserError, GitError, OSError) as exc:
             failed.append(FailedImport(path=str(file), reason=str(exc)))
             continue
         imported.append(ImportedFile(path=str(file), count=count))
@@ -107,8 +111,9 @@ def _import_one(
 
     Reads the file's provenance header(s), resolves the source, and re-records
     the dump at the current upstream HEAD. ``OSError`` (unreadable file) and
-    ``CoboError`` (clone/refresh or record failure) propagate to the caller,
-    which isolates them per file.
+    ``GitError`` (clone/refresh or blob-resolution failure) propagate to the
+    caller, which isolates them per file. A ``ConfigError`` from a malformed
+    lockfile propagates further still (it is not a per-file fault).
 
     Returns:
         The number of input boilerplates recorded for the file.

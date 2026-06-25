@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from cobo.commands.check import run_check, selected_fragments
+from cobo.commands.check import run_check
 from cobo.errors import GitError, UserError
 from cobo.lock.io import write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
@@ -31,6 +31,20 @@ class FailedFragment:
 
     path: str
     reason: str
+
+    def __post_init__(self) -> None:
+        """Reject an empty path or reason.
+
+        Raises:
+            ValueError: When ``path`` or ``reason`` is empty (a failure with no
+                cause is not actionable).
+        """
+        if not self.path:
+            msg = "FailedFragment.path must be non-empty"
+            raise ValueError(msg)
+        if not self.reason:
+            msg = "FailedFragment.reason must be non-empty"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,18 +99,18 @@ def run_sync(  # noqa: C901,PLR0913
 
     Returns:
         A SyncResult describing changed/failed fragments.
+
+    Raises:
+        UserError: When fragment outputs were rewritten but the lockfile could
+            not be written back (a partial update the caller must surface).
     """
     result = run_check(
         lock, sources, clone_root_provider, refresh=refresh, exclude=exclude
     )
-    # Reports cover only the non-excluded fragments; key them by output path
-    # (unique per lockfile) so excluded fragments can be preserved verbatim.
-    report_by_path = {
-        frag.path: report
-        for frag, report in zip(
-            selected_fragments(lock, exclude), result.reports, strict=True
-        )
-    }
+    # Each report already carries its fragment's output path (unique per
+    # lockfile), so key directly off the reports. Excluded fragments are absent
+    # from the reports and fall through the ``.get`` below to be preserved.
+    report_by_path = {report.path: report for report in result.reports}
     changed: list[str] = []
     failed: list[FailedFragment] = []
     new_fragments: list[Fragment] = []
@@ -127,10 +141,22 @@ def run_sync(  # noqa: C901,PLR0913
         changed.append(frag.path)
         new_fragments.append(rebuilt)
     if changed and not dry_run:
-        write_lock(
-            lock_path,
-            Lockfile(version=lock.version, fragments=tuple(new_fragments)),
-        )
+        try:
+            write_lock(
+                lock_path,
+                Lockfile(version=lock.version, fragments=tuple(new_fragments)),
+            )
+        except OSError as exc:
+            # The fragment outputs are already rewritten on disk, but the lock
+            # never advanced. Surface that partial state instead of crashing
+            # with a raw traceback so `check` does not report perpetual drift
+            # without explanation.
+            msg = (
+                f"Re-rendered {len(changed)} fragment(s) but could not update "
+                f"{lock_path}: {exc}. The working tree was modified; re-run "
+                f"`cobo sync` once the lockfile is writable."
+            )
+            raise UserError(msg) from exc
     return SyncResult(changed=tuple(changed), failed=tuple(failed), check=result)
 
 

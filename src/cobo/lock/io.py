@@ -44,13 +44,20 @@ def read_lock(path: Path) -> Lockfile:
         The parsed Lockfile.
 
     Raises:
-        ConfigError: When the TOML is malformed or the version unsupported.
+        ConfigError: When the lockfile cannot be read, the TOML is malformed,
+            or the version is unsupported.
     """
     try:
         with path.open("rb") as fh:
             data: dict[str, Any] = tomllib.load(fh)
     except tomllib.TOMLDecodeError as exc:
         msg = f"Malformed lockfile {path}: {exc}"
+        raise ConfigError(msg) from exc
+    except OSError as exc:
+        # The existence check in find_lock can race with permission changes or
+        # the path becoming a directory; map to a clean ConfigError so callers
+        # report exit 2 rather than crashing with a raw traceback.
+        msg = f"Could not read lockfile {path}: {exc}"
         raise ConfigError(msg) from exc
 
     version = data.get("version")

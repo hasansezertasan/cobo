@@ -1,0 +1,26 @@
+---
+name: cobo update fragments (docker)
+description: Re-render drifted cobo fragments in a container and emit a PR-ready summary.
+branding:
+  icon: refresh-cw
+  color: blue
+inputs:
+  config:
+    description: Path to a cobo config TOML (sets COBO_CONFIG). Optional.
+    required: false
+    default: ""
+  exclude:
+    description: Newline- or space-separated glob patterns of fragment paths to skip.
+    required: false
+    default: ""
+outputs:
+  sync-failed:
+    description: '"true" when any fragment failed to re-render, else "false".'
+  summary:
+    description: Markdown summary of the drift detected before sync (for a PR body).
+runs:
+  using: docker
+  image: Dockerfile
+  env:
+    INPUT_CONFIG: ${{ inputs.config }}
+    INPUT_EXCLUDE: ${{ inputs.exclude }}

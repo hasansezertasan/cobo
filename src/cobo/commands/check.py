@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,32 @@ if TYPE_CHECKING:
     from cobo.lock.schema import Fragment, Lockfile
 
 CloneRootProvider = Callable[(["Source"], Path)]
+
+
+def is_excluded(path: str, patterns: Sequence[str]) -> bool:
+    """Whether ``path`` matches any of the glob ``patterns``.
+
+    Args:
+        path: A fragment output path (relative to the lockfile directory).
+        patterns: Glob patterns (``fnmatch`` syntax) to test against.
+
+    Returns:
+        True when ``path`` matches at least one pattern.
+    """
+    return any(fnmatch(path, pattern) for pattern in patterns)
+
+
+def selected_fragments(lock: Lockfile, exclude: Sequence[str]) -> list[Fragment]:
+    """Return the fragments not filtered out by ``exclude``.
+
+    Args:
+        lock: The parsed lockfile.
+        exclude: Glob patterns; fragments whose path matches are dropped.
+
+    Returns:
+        Lockfile fragments, in order, whose path matches no exclude pattern.
+    """
+    return [frag for frag in lock.fragments if not is_excluded(frag.path, exclude)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +159,7 @@ def run_check(
     clone_root_provider: CloneRootProvider,
     *,
     refresh: bool = True,
+    exclude: Sequence[str] = (),
 ) -> CheckResult:
     """Check every fragment for drift.
 
@@ -140,13 +168,15 @@ def run_check(
         sources: Resolved sources keyed by name.
         clone_root_provider: Maps a Source to its clone path.
         refresh: When True, refresh each source clone before reading blobs.
+        exclude: Glob patterns; matching fragments are skipped entirely (not
+            evaluated and absent from the result).
 
     Returns:
-        A CheckResult with one report per fragment.
+        A CheckResult with one report per non-excluded fragment.
     """
     reports: list[FragmentReport] = [
         _check_fragment(frag, sources, clone_root_provider, refresh)
-        for frag in lock.fragments
+        for frag in selected_fragments(lock, exclude)
     ]
     return CheckResult(tuple(reports))
 

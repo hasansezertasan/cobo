@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from cobo.commands.check import run_check
+from cobo.commands.check import run_check, selected_fragments
 from cobo.errors import GitError, UserError
 from cobo.lock.io import write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
@@ -13,7 +13,7 @@ from cobo.sources.render import dump_locked as render_dump_locked
 from cobo.sources.repo import blob_sha_for_path, current_commit_sha
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     from cobo.commands.check import CheckResult, CloneRootProvider
@@ -68,6 +68,7 @@ def run_sync(  # noqa: C901,PLR0913
     lock_path: Path,
     dry_run: bool = False,
     refresh: bool = True,
+    exclude: Sequence[str] = (),
 ) -> SyncResult:
     """Re-render outdated fragments and advance the lockfile.
 
@@ -79,15 +80,31 @@ def run_sync(  # noqa: C901,PLR0913
         lock_path: Where to write the updated lockfile.
         dry_run: When True, compute changes but write nothing.
         refresh: Forwarded to the underlying check (refresh clones).
+        exclude: Glob patterns; matching fragments are left untouched in both
+            the working tree and the rewritten lockfile.
 
     Returns:
         A SyncResult describing changed/failed fragments.
     """
-    result = run_check(lock, sources, clone_root_provider, refresh=refresh)
+    result = run_check(
+        lock, sources, clone_root_provider, refresh=refresh, exclude=exclude
+    )
+    # Reports cover only the non-excluded fragments; key them by output path
+    # (unique per lockfile) so excluded fragments can be preserved verbatim.
+    report_by_path = {
+        frag.path: report
+        for frag, report in zip(
+            selected_fragments(lock, exclude), result.reports, strict=True
+        )
+    }
     changed: list[str] = []
     failed: list[FailedFragment] = []
     new_fragments: list[Fragment] = []
-    for frag, report in zip(lock.fragments, result.reports, strict=True):
+    for frag in lock.fragments:
+        report = report_by_path.get(frag.path)
+        if report is None:  # excluded — carry the entry through unchanged
+            new_fragments.append(frag)
+            continue
         if report.error is not None:
             failed.append(FailedFragment(path=frag.path, reason=report.error))
             new_fragments.append(frag)

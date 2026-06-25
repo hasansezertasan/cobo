@@ -14,7 +14,7 @@ from cobo.lock.io import (
     upsert_fragment,
     write_lock,
 )
-from cobo.lock.schema import Fragment, LockedFile
+from cobo.lock.schema import CommitSha, Fragment, LockedFile
 from cobo.sources.discover import find_boilerplate
 from cobo.sources.repo import blob_sha_for_path
 
@@ -31,7 +31,7 @@ def record_dump(  # noqa: PLR0913
     names: list[str],
     out_path: Path,
     lock_path: Path,
-    commit_sha: str,
+    commit_sha: CommitSha,
 ) -> None:
     """Upsert a fragment for a just-written dump into the lockfile.
 

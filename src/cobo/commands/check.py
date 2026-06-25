@@ -70,10 +70,16 @@ class FragmentReport:
         """Enforce that held / errored / drifted are mutually exclusive states.
 
         Raises:
-            ValueError: When the report mixes states that cannot co-occur (a
-                held report with an error or drifts, or an errored report that
-                also carries drifts).
+            ValueError: When ``path``/``source`` are empty, or the report mixes
+                states that cannot co-occur (a held report with an error or
+                drifts, or an errored report that also carries drifts).
         """
+        if not self.path:
+            msg = "FragmentReport.path must be non-empty"
+            raise ValueError(msg)
+        if not self.source:
+            msg = "FragmentReport.source must be non-empty"
+            raise ValueError(msg)
         if self.held and (self.error is not None or self.drifts):
             msg = "a held FragmentReport cannot also have an error or drifts"
             raise ValueError(msg)

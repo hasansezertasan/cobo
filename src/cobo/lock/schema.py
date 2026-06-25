@@ -4,11 +4,27 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import NewType
+
+# Distinct names for the two git object kinds stored per file. They are plain
+# strings at runtime, but the aliases make a commit/blob mix-up a type error
+# rather than a silent, content-addressed bug.
+CommitSha = NewType("CommitSha", str)
+BlobSha = NewType("BlobSha", str)
 
 # A full git object name: 40 hex chars (SHA-1) or 64 (SHA-256). Abbreviated or
 # malformed SHAs never match the resolved full SHA and would read as permanent
 # phantom drift, so they are rejected at construction.
 _SHA_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def is_full_sha(value: str) -> bool:
+    """Whether ``value`` is a full lowercase hex git object name (40 or 64).
+
+    Returns:
+        True for a 40-char (SHA-1) or 64-char (SHA-256) lowercase hex string.
+    """
+    return _SHA_RE.fullmatch(value) is not None
 
 
 def _validate_repo_rel_path(path: str) -> None:
@@ -38,8 +54,8 @@ class LockedFile:
 
     name: str
     path: str
-    commit: str
-    blob: str
+    commit: CommitSha
+    blob: BlobSha
 
     def __post_init__(self) -> None:
         """Validate field non-emptiness and SHA format at construction.
@@ -54,7 +70,7 @@ class LockedFile:
             raise ValueError(msg)
         _validate_repo_rel_path(self.path)
         for label, sha in (("commit", self.commit), ("blob", self.blob)):
-            if not _SHA_RE.fullmatch(sha):
+            if not is_full_sha(sha):
                 msg = f"LockedFile.{label} must be a full hex SHA, got {sha!r}"
                 raise ValueError(msg)
 

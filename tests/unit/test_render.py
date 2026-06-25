@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cobo.config.schema import Source
-from cobo.sources.render import build_header, dump
+from cobo.sources.render import build_header, dump, parse_provenance
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -222,3 +222,42 @@ def test_dump_locked_missing_path_raises_oserror(tmp_path: Path) -> None:
     repo = write_repo(tmp_path, {"Python.gitignore": "*.pyc\n"})
     with pytest.raises(OSError):  # noqa: PT011
         dump_locked(gitignore_source(), repo, ["Nope.gitignore"], "a" * 40)
+
+
+# ---------------------------------------------------------------------------
+# parse_provenance tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_provenance_round_trips_build_header() -> None:
+    """parse_provenance recovers (source, name) from a header build_header wrote."""
+    source = mise_source()
+    header = build_header(
+        source=source, repo_rel_path="python.mise.toml", commit_sha="a" * 40
+    )
+    content = f"{header}\n[tools]\npython = '3.12'\n"
+    assert parse_provenance(content) == [("mise", "python")]
+
+
+def test_parse_provenance_handles_multiple_blocks_in_order() -> None:
+    """Multiple header blocks yield their (source, name) pairs in order."""
+    source = mise_source()
+    blocks = [
+        build_header(
+            source=source, repo_rel_path=f"{name}.mise.toml", commit_sha="a" * 40
+        )
+        for name in ("python", "node")
+    ]
+    content = f"{blocks[0]}\nbody1\n\n{blocks[1]}\nbody2\n"
+    assert parse_provenance(content) == [("mise", "python"), ("mise", "node")]
+
+
+def test_parse_provenance_ignores_lookalike_body_lines() -> None:
+    """A token-shaped line that is not preceded by the attribution is ignored."""
+    content = "# see other/thing@deadbeef1234567 for details\n*.pyc\n"
+    assert parse_provenance(content) == []
+
+
+def test_parse_provenance_returns_empty_without_header() -> None:
+    """A file with no cobo header yields no pairs."""
+    assert parse_provenance("*.pyc\nnode_modules/\n") == []

@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from cobo.commands import record as record_module
 from cobo.commands.check import run_check
+from cobo.commands.lock_import import run_import
 from cobo.commands.record import record_dump
 from cobo.commands.sync import run_sync
 from cobo.config.schema import Source
@@ -18,6 +19,7 @@ from cobo.errors import UserError
 from cobo.lock.io import read_lock, write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
 from cobo.source_commands import build_source_subapp
+from cobo.sources.render import dump as render_dump
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
 if TYPE_CHECKING:
@@ -430,6 +432,213 @@ def test_sync_rerenders_multi_file_fragment_on_partial_drift(tmp_path: Path) -> 
     new_files = read_lock(lock_path).fragments[0].files
     assert new_files[0].blob == py_blob  # unchanged file keeps its blob
     assert new_files[1].blob != node_blob  # drifted file advanced
+
+
+def _record_two(tmp_path: Path, source: Source, clone: Path) -> Path:
+    """Record two fragments (.gitignore from Python, node.gitignore from Node).
+
+    Returns:
+        The path to the written cobo.lock.
+    """
+    lock_path = tmp_path / "cobo.lock"
+    for name, out in (("Python", ".gitignore"), ("Node", "node.gitignore")):
+        record_dump(
+            source=source,
+            clone_root=clone,
+            names=[name],
+            out_path=tmp_path / out,
+            lock_path=lock_path,
+            commit_sha=current_commit_sha(clone),
+        )
+    return lock_path
+
+
+def test_check_exclude_skips_matching_fragment(tmp_path: Path) -> None:
+    """--exclude drops a drifted fragment from evaluation and the result."""
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    lock_path = _record_two(tmp_path, source, clone)
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    result = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        exclude=[".gitignore"],
+    )
+
+    assert result.outdated_count == 0  # the only drift was excluded
+    assert all(r.path != ".gitignore" for r in result.reports)
+
+
+def test_sync_exclude_leaves_fragment_untouched(tmp_path: Path) -> None:
+    """An excluded, drifted fragment is left as-is in the file and the lock."""
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    lock_path = _record_two(tmp_path, source, clone)
+    out = tmp_path / ".gitignore"
+    out.write_text("*.pyc\n", encoding="utf-8")
+    old_blob = next(
+        f.files[0].blob
+        for f in read_lock(lock_path).fragments
+        if f.path == ".gitignore"
+    )
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+        exclude=[".gitignore"],
+    )
+
+    assert ".gitignore" not in result.changed
+    assert out.read_text(encoding="utf-8") == "*.pyc\n"  # file untouched
+    # Excluded entry is preserved verbatim in the rewritten lock.
+    py = next(f for f in read_lock(lock_path).fragments if f.path == ".gitignore")
+    assert py.files[0].blob == old_blob
+
+
+def _dump_with_header(tmp_path: Path, files: dict[str, str]) -> tuple[Source, Path]:
+    """Make a header-injecting source and clone it.
+
+    Returns:
+        The header-injecting Source and its clone path.
+    """
+    source, clone = make_source(tmp_path, files)
+    source = replace(source, inject_header=True)
+    clone_or_pull(source, clone)
+    return source, clone
+
+
+def test_lock_import_adopts_file_from_header(tmp_path: Path) -> None:
+    """Import reconstructs a lock entry from a dumped file's provenance header."""
+    source, clone = _dump_with_header(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    out = tmp_path / ".gitignore"
+    out.write_text(
+        render_dump(source, clone, ["Python"], current_commit_sha(clone)),
+        encoding="utf-8",
+    )
+    lock_path = tmp_path / "cobo.lock"
+
+    result = run_import(
+        [out], {source.name: source}, _provider_factory(clone), lock_path=lock_path
+    )
+
+    assert result.failed == ()
+    assert tuple(i.path for i in result.imported) == (str(out),)
+    frag = read_lock(lock_path).fragments[0]
+    assert frag.path == ".gitignore"
+    assert frag.source == source.name
+    assert frag.files[0].name == "Python"
+
+
+def test_lock_import_multi_name_records_all_inputs(tmp_path: Path) -> None:
+    """A multi-dump file with several headers imports every input boilerplate."""
+    source, clone = _dump_with_header(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    out = tmp_path / ".gitignore"
+    out.write_text(
+        render_dump(source, clone, ["Python", "Node"], current_commit_sha(clone)),
+        encoding="utf-8",
+    )
+    lock_path = tmp_path / "cobo.lock"
+
+    result = run_import(
+        [out], {source.name: source}, _provider_factory(clone), lock_path=lock_path
+    )
+
+    assert result.imported[0].count == 2  # noqa: PLR2004
+    names = [f.name for f in read_lock(lock_path).fragments[0].files]
+    assert names == ["Python", "Node"]
+
+
+def test_lock_import_no_header_is_a_failure(tmp_path: Path) -> None:
+    """A file lacking a cobo header is reported as failed, not crashed."""
+    source, clone = _dump_with_header(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    out = tmp_path / ".gitignore"
+    out.write_text("*.pyc\n", encoding="utf-8")  # no header
+    lock_path = tmp_path / "cobo.lock"
+
+    result = run_import(
+        [out], {source.name: source}, _provider_factory(clone), lock_path=lock_path
+    )
+
+    assert result.imported == ()
+    assert tuple(f.path for f in result.failed) == (str(out),)
+    assert "no cobo provenance header" in result.failed[0].reason
+    assert not lock_path.exists()
+
+
+def test_lock_import_unknown_source_is_a_failure(tmp_path: Path) -> None:
+    """A header naming a source absent from config is a failure, isolated per file."""
+    source, clone = _dump_with_header(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    out = tmp_path / ".gitignore"
+    out.write_text(
+        render_dump(source, clone, ["Python"], current_commit_sha(clone)),
+        encoding="utf-8",
+    )
+
+    result = run_import(
+        [out], {}, _provider_factory(clone), lock_path=tmp_path / "cobo.lock"
+    )
+
+    assert tuple(f.path for f in result.failed) == (str(out),)
+    assert f"unknown source '{source.name}'" in result.failed[0].reason
+
+
+def test_lock_import_mixed_sources_is_a_failure(tmp_path: Path) -> None:
+    """A file whose headers reference two sources is rejected (before any clone)."""
+    source, clone = _dump_with_header(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    marker = "# Generated by cobo (github.com/hasansezertasan/cobo)"
+    content = (
+        f"{marker}\n# gi/Python@5763345 — https://example.com/a\n*.pyc\n\n"
+        f"{marker}\n# other/Node@5763345 — https://example.com/b\nnode_modules/\n"
+    )
+    out = tmp_path / ".gitignore"
+    out.write_text(content, encoding="utf-8")
+
+    result = run_import(
+        [out], {source.name: source}, _provider_factory(clone), lock_path=tmp_path / "x"
+    )
+
+    assert tuple(f.path for f in result.failed) == (str(out),)
+    assert "multiple sources" in result.failed[0].reason
+
+
+def test_lock_import_preserves_held_flag(tmp_path: Path) -> None:
+    """Re-importing a held fragment keeps update=false."""
+    source, clone = _dump_with_header(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    out = tmp_path / ".gitignore"
+    out.write_text(
+        render_dump(source, clone, ["Python"], current_commit_sha(clone)),
+        encoding="utf-8",
+    )
+    lock_path = tmp_path / "cobo.lock"
+    run_import(
+        [out], {source.name: source}, _provider_factory(clone), lock_path=lock_path
+    )
+    lock = read_lock(lock_path)
+    write_lock(
+        lock_path,
+        Lockfile(version=1, fragments=(replace(lock.fragments[0], update=False),)),
+    )
+
+    run_import(
+        [out], {source.name: source}, _provider_factory(clone), lock_path=lock_path
+    )
+
+    assert read_lock(lock_path).fragments[0].update is False
 
 
 def test_record_dump_preserves_held_flag(tmp_path: Path) -> None:

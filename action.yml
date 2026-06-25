@@ -9,6 +9,10 @@ inputs:
     description: Path to a cobo config TOML (sets COBO_CONFIG). Optional.
     required: false
     default: ""
+  exclude:
+    description: Newline- or space-separated glob patterns of fragment paths to skip.
+    required: false
+    default: ""
   pr-title:
     description: Title for the opened pull request.
     required: false
@@ -32,18 +36,25 @@ runs:
       env:
         COBO_CONFIG: ${{ inputs.config }}
         ACTION_PATH: ${{ github.action_path }}
+        COBO_EXCLUDE: ${{ inputs.exclude }}
       run: |
         set -uo pipefail
         # Run the cobo that ships with this action ref (not whatever is newest
         # on PyPI), so the CLI and lockfile schema can never drift apart.
         cobo=(uvx --from "$ACTION_PATH" cobo)
+        # Turn newline/space-separated exclude patterns into repeated --exclude.
+        read -ra patterns <<< "$COBO_EXCLUDE"
+        exclude=()
+        for pattern in "${patterns[@]}"; do
+          exclude+=(--exclude "$pattern")
+        done
         # Capture the drift that motivates this PR *before* sync runs: sync
         # advances the lockfile, after which `check` would report nothing.
-        "${cobo[@]}" check --json > cobo-check.json || true
+        "${cobo[@]}" check --json "${exclude[@]}" > cobo-check.json || true
         # Re-render outdated fragments. A non-zero exit means some fragment
         # failed to re-render; still open a PR for the ones that succeeded and
         # record the failure so it surfaces in the PR body instead of aborting.
-        if "${cobo[@]}" sync; then
+        if "${cobo[@]}" sync "${exclude[@]}"; then
           echo "sync_failed=false" >> "$GITHUB_OUTPUT"
         else
           echo "sync_failed=true" >> "$GITHUB_OUTPUT"

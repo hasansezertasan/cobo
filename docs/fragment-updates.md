@@ -35,6 +35,32 @@ to the lockfile's directory.
 
 Run the same command again after `cobo gitignore update` to refresh the pin.
 
+### Adopting pre-existing dumps
+
+If you dumped boilerplates before adopting the lockfile (or generated them on
+another machine), `cobo lock import` reconstructs lock entries from the
+provenance headers already written into those files:
+
+```sh
+cobo lock import .gitignore .editorconfig
+```
+
+For each file, cobo reads its two-line provenance header(s) to recover the
+source and boilerplate name(s), re-resolves them against the **current**
+upstream HEAD, and records the entry — exactly as a fresh `dump --lock` would.
+Because cobo uses shallow clones, it cannot resurrect the original pinned
+commit, so import always adopts the current upstream state. If an imported file
+is already stale, the very next `cobo check` reports it as outdated.
+
+Requirements and behavior:
+
+- The file must carry a cobo provenance header (its source must have
+  `inject_header = true`). A file with no recognizable header is reported as a
+  failure and skipped; the remaining files are still imported.
+- All header lines within one file must reference the same source.
+- An existing `update = false` hold-back on a re-imported fragment is preserved.
+- Exit `0` when every file imported, `1` when any file failed.
+
 ---
 
 ## The cobo.lock format
@@ -116,6 +142,20 @@ For machine-readable output (e.g. in CI scripts):
 ```sh
 cobo check --json
 ```
+
+### Excluding fragments
+
+Skip specific fragments by output path with one or more `--exclude` glob
+patterns (matched with `fnmatch` against each fragment's `path`):
+
+```sh
+cobo check --exclude '.github/*' --exclude LICENSE
+```
+
+Excluded fragments are not evaluated: they never appear in the table or JSON
+and do not affect the exit code. The same `--exclude` flag is available on
+`cobo sync`, where excluded fragments are left untouched in both the working
+tree and `cobo.lock`.
 
 Emits JSON to stdout:
 
@@ -268,9 +308,54 @@ the PR).
 | Input | Default | Description |
 |---|---|---|
 | `config` | _(empty)_ | Path to a cobo config TOML. Sets `COBO_CONFIG`. Optional. |
+| `exclude` | _(empty)_ | Newline- or space-separated glob patterns; matching fragment paths are skipped by both `check` and `sync`. |
 | `pr-title` | `"chore: update cobo fragments"` | Title for the opened pull request. |
 | `pr-labels` | `"cobo"` | Comma-separated labels for the pull request. |
 | `branch` | `"cobo/update-fragments"` | Branch the action pushes updates to. |
 
 The action uses `peter-evans/create-pull-request` under the hood, so no PR is
 opened when there are no changes.
+
+### Docker-based Action
+
+A pre-built Docker variant lives at `hasansezertasan/cobo/docker@v1`. It runs
+the same `check` + `sync` inside a container, skipping the per-run `uv`
+install — useful when cold-start time matters. Because a Docker action is a
+**single container**, it cannot itself open a pull request; it runs the sync
+and exposes outputs, leaving PR creation to your workflow:
+
+```yaml
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: cobo
+        uses: hasansezertasan/cobo/docker@v1
+        with:
+          exclude: |
+            .github/*
+            LICENSE
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          title: "chore: update cobo fragments"
+          branch: cobo/update-fragments
+          body: ${{ steps.cobo.outputs.summary }}
+```
+
+| Input | Default | Description |
+|---|---|---|
+| `config` | _(empty)_ | Path to a cobo config TOML. Sets `COBO_CONFIG`. Optional. |
+| `exclude` | _(empty)_ | Newline- or space-separated glob patterns to skip. |
+
+| Output | Description |
+|---|---|
+| `sync-failed` | `"true"` when any fragment failed to re-render, else `"false"`. |
+| `summary` | A Markdown summary of the drift detected before sync (for the PR body). |
+
+The composite Action (`hasansezertasan/cobo@v1`) remains the simplest choice
+for the full drift-to-PR flow; reach for the Docker variant only when you want
+to compose the steps yourself or avoid the install step.

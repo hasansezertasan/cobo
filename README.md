@@ -169,7 +169,7 @@ cobo lock import .gitignore .editorconfig   # reconstruct lock entries from head
 **Check for drift:**
 
 ```sh
-cobo check          # Rich table; exits 0 (clean), 1 (updates available), 2 (no lock)
+cobo check          # Rich table; exits 0 (clean), 1 (updates available), 2 (no/invalid lock)
 cobo check --strict # also exit non-zero when a fragment errored (CI gate)
 cobo check --json   # machine-readable JSON with outdated_count, error_count, fragments
 cobo check --exclude '.github/*'  # skip fragments whose path matches a glob

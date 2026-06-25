@@ -9,7 +9,7 @@ import typer
 
 from cobo.commands.record import record_dump, resolve_lock_path
 from cobo.config.schema import Source
-from cobo.errors import GitError, UserError
+from cobo.errors import ConfigError, GitError, UserError
 from cobo.sources.discover import list_boilerplates, search_boilerplates
 from cobo.sources.render import dump as render_dump
 from cobo.sources.repo import clone_or_pull, current_commit_sha
@@ -115,7 +115,8 @@ def _register_dump(  # noqa: C901
         Raises:
             Exit: Code 1 if a name is not found, multi-dump is rejected, or the
                 output cannot be recorded relative to the lockfile; code 2 if
-                --lock is used without --out.
+                --lock is used without --out or an existing cobo.lock is
+                malformed.
         """
         target = clone_root_provider(source)
         if not target.exists():
@@ -149,6 +150,11 @@ def _register_dump(  # noqa: C901
                     lock_path=resolve_lock_path(Path.cwd()),
                     commit_sha=commit_sha,
                 )
+            except ConfigError as exc:
+                # A malformed pre-existing cobo.lock: exit 2, matching the
+                # clean error `cobo check`/`cobo sync` give for the same case.
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(2) from exc
             except (UserError, GitError) as exc:
                 typer.echo(str(exc), err=True)
                 raise typer.Exit(1) from exc

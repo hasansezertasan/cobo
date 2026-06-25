@@ -16,7 +16,7 @@ from cobo.commands.check import CheckResult, FragmentReport, run_check
 from cobo.commands.lock_import import run_import
 from cobo.commands.record import resolve_lock_path
 from cobo.commands.sync import run_sync
-from cobo.errors import ConfigError, GitError
+from cobo.errors import ConfigError, GitError, UserError
 from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
 from cobo.sources.repo import clone_or_pull
@@ -273,7 +273,7 @@ def _print_check_table(result: CheckResult) -> None:
 
 def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C901
     @app.command()
-    def sync(
+    def sync(  # noqa: C901
         dry_run: bool = typer.Option(  # noqa: FBT001
             False,  # noqa: FBT003
             "--dry-run",
@@ -289,21 +289,26 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
 
         Raises:
             Exit: Code 2 when no cobo.lock is found or it is malformed; code 1
-                when any fragment failed to re-render; code 0 otherwise.
+                when any fragment failed to re-render or the lockfile could not
+                be written back after re-rendering; code 0 otherwise.
         """
         lock_path = find_lock(Path.cwd())
         if lock_path is None:
             typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
             raise typer.Exit(2)
-        result = run_sync(
-            _load_lock_or_exit(lock_path),
-            config.sources,
-            _clone_root_provider,
-            lock_dir=lock_path.parent,
-            lock_path=lock_path,
-            dry_run=dry_run,
-            exclude=exclude,
-        )
+        try:
+            result = run_sync(
+                _load_lock_or_exit(lock_path),
+                config.sources,
+                _clone_root_provider,
+                lock_dir=lock_path.parent,
+                lock_path=lock_path,
+                dry_run=dry_run,
+                exclude=exclude,
+            )
+        except UserError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
         for path in result.changed:
             typer.echo(f"updated: {path}")
         for failure in result.failed:
@@ -326,14 +331,19 @@ def _register_lock(app: typer.Typer, *, config: CoboConfig) -> None:
         """Adopt pre-existing dumps into cobo.lock from their provenance headers.
 
         Raises:
-            Exit: Code 1 when any file failed to import; code 0 otherwise.
+            Exit: Code 2 when the existing cobo.lock is malformed; code 1 when
+                any file failed to import; code 0 otherwise.
         """
-        result = run_import(
-            files,
-            config.sources,
-            _clone_root_provider,
-            lock_path=resolve_lock_path(Path.cwd()),
-        )
+        try:
+            result = run_import(
+                files,
+                config.sources,
+                _clone_root_provider,
+                lock_path=resolve_lock_path(Path.cwd()),
+            )
+        except ConfigError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(2) from exc
         for imported in result.imported:
             typer.echo(f"imported: {imported.path} ({imported.count} file(s))")
         for failure in result.failed:

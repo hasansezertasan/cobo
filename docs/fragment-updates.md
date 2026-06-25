@@ -320,11 +320,10 @@ opened when there are no changes.
 
 ### Docker-based Action
 
-A pre-built Docker variant lives at `hasansezertasan/cobo/docker@v1`. It runs
-the same `check` + `sync` inside a container, skipping the per-run `uv`
-install — useful when cold-start time matters. Because a Docker action is a
-**single container**, it cannot itself open a pull request; it runs the sync
-and exposes outputs, leaving PR creation to your workflow:
+A Docker variant lives at `hasansezertasan/cobo/docker@v1`. It runs the same
+`check` + `sync` inside a container. Because a Docker action is a **single
+container**, it cannot itself open a pull request; it runs the sync and exposes
+outputs, leaving PR creation to your workflow:
 
 ```yaml
 jobs:
@@ -360,4 +359,31 @@ jobs:
 
 The composite Action (`hasansezertasan/cobo@v1`) remains the simplest choice
 for the full drift-to-PR flow; reach for the Docker variant only when you want
-to compose the steps yourself or avoid the install step.
+to compose the steps yourself.
+
+#### Prebuilt image
+
+Every release publishes a prebuilt image to the GitHub Container Registry so you
+can skip the per-run image build entirely (the fastest cold start). Tags track
+the release: the full version (`1.2.3`), the major (`1`), and `latest`.
+
+```
+ghcr.io/hasansezertasan/cobo:1.2.3
+ghcr.io/hasansezertasan/cobo:1
+ghcr.io/hasansezertasan/cobo:latest
+```
+
+Reference it directly as a container step (it reads the same `INPUT_CONFIG` /
+`INPUT_EXCLUDE` env vars the action passes, and writes `sync-failed` / `summary`
+to `$GITHUB_OUTPUT`):
+
+```yaml
+- id: cobo
+  uses: docker://ghcr.io/hasansezertasan/cobo:1
+  env:
+    INPUT_EXCLUDE: |
+      .github/*
+```
+
+The bundled `docker/` action instead builds from its `Dockerfile` at the pinned
+ref, which keeps the entrypoint and image in lockstep with the action version.

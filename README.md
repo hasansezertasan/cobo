@@ -143,6 +143,61 @@ cobo
     └── remote          (this source's git URL)
 ```
 
+## Keeping fragments up to date
+
+cobo can track dumped boilerplates and alert you when upstream templates change —
+the same Dependabot/Renovate pattern applied to boilerplates.
+
+**Record a dump:**
+
+```sh
+cobo gitignore dump Python Node --out .gitignore --lock
+```
+
+`--lock` writes a `cobo.lock` file: cobo walks up from the current working
+directory for the nearest existing `cobo.lock` and updates it, or creates one
+in the current working directory if none is found. Re-run after
+`cobo gitignore update` to refresh the pin. (`--lock` requires `--out`.)
+
+Already have dumped files from before the lockfile? Adopt them from their
+provenance headers:
+
+```sh
+cobo lock import .gitignore .editorconfig   # reconstruct lock entries from headers
+```
+
+**Check for drift:**
+
+```sh
+cobo check          # Rich table; exits 0 (clean), 1 (updates available), 2 (no/invalid lock)
+cobo check --strict # also exit non-zero when a fragment errored (CI gate)
+cobo check --json   # machine-readable JSON with outdated_count, error_count, fragments
+cobo check --exclude '.github/*'  # skip fragments whose path matches a glob
+```
+
+**Apply updates:**
+
+```sh
+cobo sync           # re-renders outdated fragments and advances cobo.lock
+cobo sync --dry-run # shows changes without writing
+cobo sync --exclude '.github/*'  # leave matching fragments untouched
+```
+
+Commit the updated output files and `cobo.lock` together.
+
+**Hold a fragment back:** set `update = false` in its `[[fragment]]` block in
+`cobo.lock`; `check` and `sync` skip it and show it as "held".
+
+**Automate with GitHub Actions:** add `hasansezertasan/cobo@v1` to a weekly
+workflow — it runs `cobo sync` and opens a PR when fragments drift. Requires
+`permissions: contents: write` and `pull-requests: write`. A pre-built Docker
+variant (`hasansezertasan/cobo/docker@v1`) is also available for faster
+cold-starts.
+
+See [docs/fragment-updates.md](docs/fragment-updates.md) for the full guide:
+lockfile format, exit-code tables, provenance headers, and a ready-to-paste
+consuming workflow.
+
 ## Author
 
 Maintained by [Hasan Sezer Taşan](https://github.com/hasansezertasan).

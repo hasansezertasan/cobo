@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from git import GitCommandError, InvalidGitRepositoryError, NoSuchPathError, Repo
 
-from cobo.errors import ConfigError, GitError
+from cobo.errors import ConfigError, FileAbsentError, GitError
+from cobo.lock.schema import BlobSha, CommitSha
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,7 +76,7 @@ def _pull(clone_root: Path, branch: str) -> None:
     repo.git.clean("-fdx")
 
 
-def current_commit_sha(clone_root: Path) -> str:
+def current_commit_sha(clone_root: Path) -> CommitSha:
     """Return HEAD's full SHA for an existing clone.
 
     Raises:
@@ -86,4 +87,47 @@ def current_commit_sha(clone_root: Path) -> str:
     except (InvalidGitRepositoryError, NoSuchPathError) as exc:
         msg = f"not a git repository: {clone_root}"
         raise GitError(msg) from exc
-    return repo.head.commit.hexsha
+    return CommitSha(repo.head.commit.hexsha)
+
+
+def blob_sha_for_path(clone_root: Path, repo_path: str) -> BlobSha:
+    """Return the blob SHA of ``repo_path`` at the clone's HEAD.
+
+    Uses ``git rev-parse HEAD:<path>``, which works on a shallow (depth-1)
+    clone and is content-addressed: the SHA changes iff the file content
+    changes. This is the drift key for fragment updates.
+
+    Args:
+        clone_root: Path to an existing source clone.
+        repo_path: Repo-relative POSIX path of the file at HEAD.
+
+    Returns:
+        The full hex blob SHA (40 chars for SHA-1 repos, 64 for SHA-256).
+
+    Raises:
+        FileAbsentError: When ``repo_path`` does not exist at HEAD (the file was
+            removed upstream) — a legitimate drift signal. Note this is a
+            subclass of ``GitError``, so callers that need to treat absence
+            differently must catch ``FileAbsentError`` *before* ``GitError``.
+        GitError: When the clone itself is invalid or missing (an infrastructure
+            failure, not a deletion).
+    """
+    try:
+        repo = Repo(clone_root)
+    except (InvalidGitRepositoryError, NoSuchPathError) as exc:
+        msg = f"could not resolve blob for '{repo_path}' in {clone_root}: {exc}"
+        raise GitError(msg) from exc
+    try:
+        return BlobSha(str(repo.git.rev_parse(f"HEAD:{repo_path}")))
+    except GitCommandError as exc:
+        # Distinguish a genuinely missing path (legitimate drift) from any other
+        # rev-parse failure (a corrupt object, an ambiguous ref). git phrases the
+        # former as "does not exist in 'HEAD'" / "exists on disk, but not in";
+        # anything else is an infrastructure fault, surfaced as a plain GitError
+        # so it is not silently misread as a file removed upstream.
+        detail = f"{exc}".lower()
+        if "does not exist" in detail or "exists on disk, but not in" in detail:
+            msg = f"path '{repo_path}' is absent at HEAD in {clone_root}: {exc}"
+            raise FileAbsentError(msg) from exc
+        msg = f"could not resolve blob for '{repo_path}' in {clone_root}: {exc}"
+        raise GitError(msg) from exc

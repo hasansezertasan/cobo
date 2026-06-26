@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import platform
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -10,14 +12,19 @@ from rich.console import Console
 from rich.table import Table
 
 from cobo import __version__
-from cobo.errors import GitError
+from cobo.commands.check import CheckResult, FragmentReport, run_check
+from cobo.commands.lock_import import run_import
+from cobo.commands.record import resolve_lock_path
+from cobo.commands.sync import run_sync
+from cobo.errors import ConfigError, GitError, UserError
+from cobo.exit_codes import ExitCode
+from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
 from cobo.sources.repo import clone_or_pull
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from cobo.config.schema import CoboConfig
+    from cobo.config.schema import CoboConfig, Source
+    from cobo.lock.schema import Lockfile
 
 _console = Console()
 
@@ -43,6 +50,9 @@ def attach_globals(
     _register_root(app, cache_root=cache_root)
     _register_config(app, config=config)
     _register_config_path(app, user_config_file=user_config_file)
+    _register_check(app, config=config)
+    _register_sync(app, config=config)
+    _register_lock(app, config=config)
 
 
 def _register_version(app: typer.Typer) -> None:
@@ -132,3 +142,210 @@ def _register_config_path(app: typer.Typer, *, user_config_file: Path) -> None:
     def config_path_cmd() -> None:
         """Print the user config file path (whether it exists or not)."""
         typer.echo(str(user_config_file))
+
+
+def _clone_root_provider(source: Source) -> Path:
+    """Map a source to its cache clone path.
+
+    Returns:
+        The clone root directory for the source.
+    """
+    return source_clone_root(source.name)
+
+
+def _load_lock_or_exit(lock_path: Path) -> Lockfile:
+    """Read a lockfile, exiting cleanly (code 2) if it is malformed.
+
+    Args:
+        lock_path: Path to the cobo.lock to parse.
+
+    Returns:
+        The parsed Lockfile.
+
+    Raises:
+        Exit: Code 2 with the underlying message when the lockfile is malformed
+            or its version is unsupported (a ``ConfigError``), so the user sees
+            a readable error rather than a raw traceback.
+    """
+    try:
+        return read_lock(lock_path)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+
+
+def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
+    @app.command()
+    def check(
+        json_output: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--json",
+            help="Emit machine-readable JSON.",
+        ),
+        strict: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--strict",
+            help="Also exit non-zero when a fragment errored (e.g. its source "
+            "is unknown or unreachable). Useful as a CI gate.",
+        ),
+        exclude: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude",
+            help="Glob pattern of fragment paths to skip. Repeatable.",
+        ),
+    ) -> None:
+        """Report fragments whose origin has drifted from the lockfile.
+
+        Raises:
+            Exit: Code 2 when no cobo.lock is found or it is malformed; code 1
+                when updates are available (or, with --strict, when any fragment
+                errored); code 0 when everything is up to date.
+        """
+        lock_path = find_lock(Path.cwd())
+        if lock_path is None:
+            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
+            raise typer.Exit(ExitCode.USAGE)
+        result = run_check(
+            _load_lock_or_exit(lock_path),
+            config.sources,
+            _clone_root_provider,
+            exclude=exclude,
+        )
+        if json_output:
+            typer.echo(json.dumps(_result_to_dict(result)))
+        else:
+            _print_check_table(result)
+        raise typer.Exit(result.exit_code(strict=strict))
+
+
+def _result_to_dict(result: CheckResult) -> dict[str, object]:
+    """Convert a CheckResult to a JSON-serializable dict.
+
+    Returns:
+        A dict with ``outdated_count``, ``error_count`` and a ``fragments`` array.
+    """
+    return {
+        "outdated_count": result.outdated_count,
+        "error_count": result.error_count,
+        "fragments": [
+            {
+                "path": r.path,
+                "source": r.source,
+                "held": r.held,
+                "outdated": r.outdated,
+                "error": r.error,
+                "files": [
+                    {"name": d.name, "old_blob": d.old_blob, "new_blob": d.new_blob}
+                    for d in r.drifts
+                ],
+            }
+            for r in result.reports
+        ],
+    }
+
+
+def _status_label(report: FragmentReport) -> str:
+    """Return the human-readable status cell for one fragment report.
+
+    Returns:
+        One of: an error string, ``held``, ``outdated (N file(s))``, or
+        ``up to date``.
+    """
+    if report.error is not None:
+        return f"error: {report.error}"
+    if report.held:
+        return "held"
+    if report.outdated:
+        return f"outdated ({len(report.drifts)} file(s))"
+    return "up to date"
+
+
+def _print_check_table(result: CheckResult) -> None:
+    """Print a Rich table summarizing the check result."""
+    table = Table("Fragment", "Source", "Status")
+    for r in result.reports:
+        table.add_row(r.path, r.source, _status_label(r))
+    _console.print(table)
+    _console.print(f"{result.outdated_count} fragment(s) need updating.")
+    if result.error_count:
+        _console.print(f"{result.error_count} fragment(s) could not be evaluated.")
+
+
+def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C901
+    @app.command()
+    def sync(  # noqa: C901
+        dry_run: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--dry-run",
+            help="Show what would change without writing.",
+        ),
+        exclude: list[str] = typer.Option(  # noqa: B008
+            [],
+            "--exclude",
+            help="Glob pattern of fragment paths to skip. Repeatable.",
+        ),
+    ) -> None:
+        """Re-render outdated fragments and open them for commit.
+
+        Raises:
+            Exit: Code 2 when no cobo.lock is found or it is malformed; code 1
+                when any fragment failed to re-render or the lockfile could not
+                be written back after re-rendering; code 0 otherwise.
+        """
+        lock_path = find_lock(Path.cwd())
+        if lock_path is None:
+            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
+            raise typer.Exit(ExitCode.USAGE)
+        try:
+            result = run_sync(
+                _load_lock_or_exit(lock_path),
+                config.sources,
+                _clone_root_provider,
+                lock_dir=lock_path.parent,
+                lock_path=lock_path,
+                dry_run=dry_run,
+                exclude=exclude,
+            )
+        except UserError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(ExitCode.FAILURE) from exc
+        for path in result.changed:
+            typer.echo(f"updated: {path}")
+        for failure in result.failed:
+            typer.echo(f"failed: {failure.path}: {failure.reason}", err=True)
+        if not result.changed and not result.failed:
+            typer.echo("All fragments up to date.")
+        raise typer.Exit(result.exit_code)
+
+
+def _register_lock(app: typer.Typer, *, config: CoboConfig) -> None:
+    sub = typer.Typer(no_args_is_help=True, help="Lockfile maintenance.")
+    app.add_typer(sub, name="lock")
+
+    @sub.command("import")
+    def import_cmd(
+        files: list[Path] = typer.Argument(  # noqa: B008
+            ..., help="Previously dumped files to adopt into cobo.lock."
+        ),
+    ) -> None:
+        """Adopt pre-existing dumps into cobo.lock from their provenance headers.
+
+        Raises:
+            Exit: Code 2 when the existing cobo.lock is malformed; code 1 when
+                any file failed to import; code 0 otherwise.
+        """
+        try:
+            result = run_import(
+                files,
+                config.sources,
+                _clone_root_provider,
+                lock_path=resolve_lock_path(Path.cwd()),
+            )
+        except ConfigError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(ExitCode.USAGE) from exc
+        for imported in result.imported:
+            typer.echo(f"imported: {imported.path} ({imported.count} file(s))")
+        for failure in result.failed:
+            typer.echo(f"failed: {failure.path}: {failure.reason}", err=True)
+        raise typer.Exit(result.exit_code)

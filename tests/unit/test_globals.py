@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import io
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 import typer
+from rich.console import Console
 from typer.testing import CliRunner
 
 from cobo import globals as cobo_globals
+from cobo.commands.check import CheckResult, FragmentReport
+from cobo.commands.sync import FailedFragment, SyncResult
 from cobo.config.schema import CoboConfig, Source
-from cobo.errors import GitError
+from cobo.errors import ConfigError, GitError, UserError
 from cobo.globals import attach_globals
+from cobo.lock.diff import FileDrift
+from cobo.paths import source_clone_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -126,3 +133,226 @@ def test_update_exits_with_failure_count(
     assert result.exit_code == 1
     assert "demo: failed" in result.output
     assert "remote unreachable" in result.output
+
+
+_LOCK_CONTENT = """\
+version = 1
+
+[[fragment]]
+path = ".gitignore"
+source = "does-not-exist"
+update = true
+
+  [[fragment.files]]
+  name = "Python"
+  path = "Python.gitignore"
+  commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  blob = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+"""
+
+
+def _make_sync_result(
+    changed: tuple[str, ...] = (),
+    failed: tuple[FailedFragment, ...] = (),
+) -> SyncResult:
+    check = CheckResult(reports=())
+    return SyncResult(changed=changed, failed=failed, check=check)
+
+
+def test_sync_reports_changed_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo sync` prints updated paths and exits 0 when there are only changes."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_sync",
+        MagicMock(return_value=_make_sync_result(changed=(".gitignore",))),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "updated: .gitignore" in result.output
+
+
+def test_sync_reports_failed_paths_and_exits_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo sync` prints failed paths with their reason and exits 1."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_sync",
+        MagicMock(
+            return_value=_make_sync_result(
+                failed=(FailedFragment(path=".gitignore", reason="gone upstream"),),
+            ),
+        ),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 1, result.output
+    assert "failed: .gitignore: gone upstream" in result.output
+
+
+def test_sync_clean_run_exits_0(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo sync` with nothing changed and nothing failed exits 0 with a notice."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals, "run_sync", MagicMock(return_value=_make_sync_result())
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "All fragments up to date." in result.output
+
+
+def test_sync_partial_write_failure_exits_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A UserError from run_sync (outputs written, lock not) is a clean exit 1.
+
+    Guards the partial-write path: the working tree was modified but the lock
+    could not be advanced; the user must see a message, not a raw traceback.
+    """
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_sync",
+        MagicMock(side_effect=UserError("Re-rendered 1 fragment(s) but could not ...")),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["sync"])
+    assert result.exit_code == 1, result.output
+    assert "could not" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_lock_import_malformed_lock_exits_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed cobo.lock surfaced during import is a global exit 2, not per-file.
+
+    Unlike a per-file fault (exit 1), a corrupt lockfile is one problem reported
+    once, matching `check`/`sync`.
+    """
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / ".gitignore"
+    target.write_text("*.pyc\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_import",
+        MagicMock(side_effect=ConfigError("Malformed lockfile cobo.lock")),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["lock", "import", str(target)])
+    assert result.exit_code == 2, result.output  # noqa: PLR2004
+    assert "Malformed lockfile" in result.output
+
+
+def test_check_outdated_exits_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cobo check` exits 1 when a fragment is outdated (drift detected)."""
+    (tmp_path / "cobo.lock").write_text(_LOCK_CONTENT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    outdated = FragmentReport(
+        path=".gitignore",
+        source="demo",
+        held=False,
+        drifts=(FileDrift(name="Python", path="p", old_blob="o", new_blob="n"),),
+    )
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_check",
+        MagicMock(return_value=CheckResult(reports=(outdated,))),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["check"])
+    assert result.exit_code == 1, result.output
+    assert "outdated" in result.output
+
+
+def test_clone_root_provider_maps_source_to_cache_path() -> None:
+    """_clone_root_provider returns the cache clone root for the source name."""
+    source = Source(name="gi", url="https://github.com/x/y", extension=".gitignore")
+    assert cobo_globals._clone_root_provider(source) == source_clone_root("gi")  # noqa: SLF001
+
+
+def test_print_check_table_renders_all_status_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_print_check_table renders error/held/outdated/up-to-date rows."""
+    buf = io.StringIO()
+    monkeypatch.setattr(cobo_globals, "_console", Console(file=buf, width=200))
+    reports = (
+        FragmentReport(
+            path="a.txt",
+            source="s",
+            held=False,
+            drifts=(FileDrift(name="n", path="p", old_blob="o", new_blob="x"),),
+        ),
+        FragmentReport(path="b.txt", source="s", held=True, drifts=()),
+        FragmentReport(path="c.txt", source="s", held=False, drifts=(), error="boom"),
+        FragmentReport(path="d.txt", source="s", held=False, drifts=()),
+    )
+    cobo_globals._print_check_table(CheckResult(reports))  # noqa: SLF001
+    out = buf.getvalue()
+    assert "outdated" in out
+    assert "up to date" in out
+    assert "held" in out
+    assert "boom" in out
+
+
+def test_fragment_report_rejects_held_with_drifts() -> None:
+    """A held report carrying drifts is an illegal state and is rejected."""
+    drift = FileDrift(name="n", path="p", old_blob="o", new_blob="x")
+    with pytest.raises(ValueError, match="held"):
+        FragmentReport(path="a", source="s", held=True, drifts=(drift,))
+
+
+def test_fragment_report_rejects_error_with_drifts() -> None:
+    """An errored report cannot also carry drifts."""
+    drift = FileDrift(name="n", path="p", old_blob="o", new_blob="x")
+    with pytest.raises(ValueError, match="errored"):
+        FragmentReport(path="a", source="s", held=False, drifts=(drift,), error="boom")
+
+
+def test_fragment_report_rejects_empty_path() -> None:
+    """A report must carry a non-empty fragment path."""
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        FragmentReport(path="", source="s", held=False, drifts=())
+
+
+def test_fragment_report_rejects_empty_source() -> None:
+    """A report must carry a non-empty source name."""
+    with pytest.raises(ValueError, match="source must be non-empty"):
+        FragmentReport(path="a", source="", held=False, drifts=())
+
+
+def test_failed_fragment_rejects_empty_path() -> None:
+    """A failed fragment must name the path that failed."""
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        FailedFragment(path="", reason="boom")
+
+
+def test_failed_fragment_rejects_empty_reason() -> None:
+    """A failure with no captured cause is not actionable and is rejected."""
+    with pytest.raises(ValueError, match="reason must be non-empty"):
+        FailedFragment(path="a", reason="")
+
+
+def test_sync_result_rejects_changed_failed_overlap() -> None:
+    """A path cannot be both changed and failed in the same SyncResult."""
+    with pytest.raises(ValueError, match="both changed and failed"):
+        SyncResult(
+            changed=(".gitignore",),
+            failed=(FailedFragment(path=".gitignore", reason="x"),),
+            check=CheckResult(reports=()),
+        )

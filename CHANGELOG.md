@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/hasansezertasan/cobo/compare/v0.2.0...v0.2.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **ci:** create release tag eagerly via force-tag-creation ([#49](https://github.com/hasansezertasan/cobo/issues/49)) ([bae2d13](https://github.com/hasansezertasan/cobo/commit/bae2d1365c092f20f2d73e2f4e7d338906f4f435))
+* **deps:** update dependency platformdirs to v4.10.0 ([#33](https://github.com/hasansezertasan/cobo/issues/33)) ([516bb14](https://github.com/hasansezertasan/cobo/commit/516bb14d683fceff0d1282a2036fa72e83345227))
+* **deps:** update dependency typer to v0.26.8 ([#60](https://github.com/hasansezertasan/cobo/issues/60)) ([36ccf98](https://github.com/hasansezertasan/cobo/commit/36ccf981cb8d0eb9bbcca27e88ef1606855da09c))
+
 ## [0.2.0](https://github.com/hasansezertasan/cobo/compare/v0.1.0...v0.2.0) (2026-06-23)
 
 

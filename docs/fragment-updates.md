@@ -387,3 +387,16 @@ to `$GITHUB_OUTPUT`):
 
 The bundled `docker/` action instead builds from its `Dockerfile` at the pinned
 ref, which keeps the entrypoint and image in lockstep with the action version.
+
+> [!NOTE]
+> **First-release setup (one-time).** The first `publish-docker` run creates
+> the GHCR package as **private** and **unlinked** from the repository. Until an
+> owner adjusts it, `docker://ghcr.io/hasansezertasan/cobo:…` pulls require
+> authentication. After the first release, in the package settings
+> (**repo → Packages → cobo → Package settings**):
+>
+> - set the visibility to **public**, and
+> - **link** the package to this repository (Manage Actions access) so it
+>   inherits the repo's permissions.
+>
+> This is only needed once; later releases reuse the existing package.

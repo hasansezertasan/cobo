@@ -69,18 +69,6 @@ wheels = [
 ]
 
 [[package]]
-name = "click"
-version = "8.3.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/63/f9e1ea081ce35720d8b92acde70daaedace594dc93b693c869e0d5910718/click-8.3.3.tar.gz", hash = "sha256:398329ad4837b2ff7cbe1dd166a4c0f8900c3ca3a218de04466f38f6497f18a2", size = 328061, upload-time = "2026-04-22T15:11:27.506Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/44/c1221527f6a71a01ec6fbad7fa78f1d50dfa02217385cf0fa3eec7087d59/click-8.3.3-py3-none-any.whl", hash = "sha256:a2bf429bb3033c89fa4936ffb35d5cb471e3719e1f3c8a7c3fff0b8314305613", size = 110502, upload-time = "2026-04-22T15:11:25.044Z" },
-]
-
-[[package]]
 name = "cobo"
 source = { editable = "." }
 dependencies = [
@@ -154,7 +142,7 @@ dev = [
     { name = "pytest-rerunfailures", specifier = "==16.3" },
     { name = "pytest-xdist", extras = ["psutil"], specifier = "==3.8.0" },
     { name = "ruff", specifier = "==0.15.20" },
-    { name = "slotscheck", specifier = "==0.20.0" },
+    { name = "slotscheck", specifier = "==0.20.1" },
     { name = "taplo", specifier = "==0.9.3" },
     { name = "tox", specifier = ">=4.54.0" },
     { name = "tox-uv", specifier = ">=1.35.2" },
@@ -170,7 +158,7 @@ lint = [
     { name = "pyrefly", specifier = "==1.1.1" },
     { name = "pyright", specifier = "==1.1.411" },
     { name = "ruff", specifier = "==0.15.20" },
-    { name = "slotscheck", specifier = "==0.20.0" },
+    { name = "slotscheck", specifier = "==0.20.1" },
     { name = "taplo", specifier = "==0.9.3" },
     { name = "ty", specifier = "==0.0.55" },
     { name = "typos", specifier = "==1.48.0" },
@@ -666,14 +654,11 @@ wheels = [
 
 [[package]]
 name = "slotscheck"
-version = "0.20.0"
+version = "0.20.1"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/da/1e6218819012774a34c0cde0074f4e217e1e8511f9d8b693a2a13572428c/slotscheck-0.20.0.tar.gz", hash = "sha256:7069653d51578c08239fabe26cb55fa81acfd17ce72cb404e6b957874058a5bd", size = 16410, upload-time = "2026-05-29T08:48:24.737Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/dc/46346431b07aefd028e48569b8b4a067a7604f98559a14e848d90febaea0/slotscheck-0.20.1.tar.gz", hash = "sha256:f590fddcea4b673f6ef3ee0010a545df1cad96941ef09906b28b2ee31c38c66b", size = 14747, upload-time = "2026-07-05T13:23:28.803Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/18/bcd02d55073eeffd7a9ae75e78a6a6043fea9e204fecb11b2ae186dc3a40/slotscheck-0.20.0-py3-none-any.whl", hash = "sha256:8d994ca932b651d5a93be6ed3215cb6114e433aef8ddb79e051d68c0b32eafb5", size = 17770, upload-time = "2026-05-29T08:48:23.521Z" },
+    { url = "https://files.pythonhosted.org/packages/59/e9/232563e90b04c3ddd93af1a6ecf8ff8566ad7bb80e46843c472c36f2578c/slotscheck-0.20.1-py3-none-any.whl", hash = "sha256:e8ec875fc40e37660babb28805294615d5631bb09c51ee75db08d03d4b6c156e", size = 17634, upload-time = "2026-07-05T13:23:27.53Z" },
 ]
 
 [[package]]

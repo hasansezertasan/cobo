@@ -302,7 +302,9 @@ def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
     old_commit = read_lock(lock_path).fragments[0].files[0].commit
     out = tmp_path / ".gitignore"
     before = managed.wrap("*.pyc\n", source.comment_prefix)
-    out.write_text(before, encoding="utf-8")
+    # write_bytes, not write_text: cobo always writes LF, and write_text would
+    # translate to CRLF on Windows and mismatch the LF-based block hash.
+    out.write_bytes(before.encode("utf-8"))
     advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
 
     result = run_sync(
@@ -314,7 +316,7 @@ def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
         dry_run=True,
     )
     assert result.changed == (".gitignore",)
-    assert out.read_text(encoding="utf-8") == before  # unchanged
+    assert out.read_bytes() == before.encode("utf-8")  # unchanged
     assert read_lock(lock_path).fragments[0].files[0].commit == old_commit
 
 

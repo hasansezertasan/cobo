@@ -168,6 +168,7 @@ Emits JSON to stdout:
   "outdated_count": 1,
   "error_count": 0,
   "locally_modified_count": 0,
+  "sync_blocked_count": 0,
   "fragments": [
     {
       "path": ".gitignore",
@@ -189,7 +190,7 @@ Emits JSON to stdout:
 | Code | Meaning |
 |---|---|
 | `0` | All tracked fragments are up to date. |
-| `1` | One or more fragments have updates available or were **locally modified** (or, with `--strict`, one or more fragments errored). |
+| `1` | One or more fragments have updates available, or their on-disk block would **block `sync`** — edited locally, or with missing/broken markers (or, with `--strict`, one or more fragments errored). |
 | `2` | No `cobo.lock` found or it is malformed. Run `cobo <source> dump --lock` first. |
 
 > Fragments that cannot be evaluated (e.g. their `source` is not configured) are

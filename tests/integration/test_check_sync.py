@@ -11,6 +11,7 @@ import typer
 from typer.testing import CliRunner
 
 from cobo import globals as cobo_globals
+from cobo.commands import check as check_module
 from cobo.commands import record as record_module
 from cobo.commands import sync as sync_module
 from cobo.commands.check import run_check
@@ -1225,3 +1226,83 @@ def test_dump_out_write_failure_exits_1(
     result = runner.invoke(sub, ["dump", "Python", "--out", str(out)])
     assert result.exit_code == 1, result.output
     assert "Could not write" in result.output
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (b"hand-written, no markers\n", "MISSING"),
+        (None, "MALFORMED"),  # duplicate begin marker, filled in below
+    ],
+)
+def test_check_flags_unsyncable_markers_as_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: bytes | None, expected: str
+) -> None:
+    """MISSING/MALFORMED marker states count toward sync_blocked_count (exit 1)."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    if mutate is not None:
+        out.write_bytes(mutate)
+    else:  # duplicate the block -> two begin markers -> MALFORMED
+        out.write_bytes(out.read_bytes() * 2)
+
+    result = run_check(
+        read_lock(tmp_path / "cobo.lock"),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+    )
+    assert result.reports[0].local_state is getattr(managed.BlockState, expected)
+    assert result.sync_blocked_count == 1
+    assert result.exit_code() == 1
+
+
+def test_check_invalid_clone_without_refresh_reports_error(tmp_path: Path) -> None:
+    """A blob read against a non-repo clone (refresh skipped) is a fragment error."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    not_repo = tmp_path / "not_a_repo"
+    not_repo.mkdir()
+    result = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(not_repo),
+        refresh=False,
+        lock_dir=tmp_path,
+    )
+    assert result.reports[0].error is not None
+
+
+def test_check_refreshes_each_source_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two fragments from one source trigger a single clone_or_pull, not two."""
+    source, clone = make_source(
+        tmp_path,
+        {"Python.gitignore": "*.pyc\n", "Node.gitignore": "node_modules/\n"},
+    )
+    clone_or_pull(source, clone)
+    lock_path = tmp_path / "cobo.lock"
+    for name, out in (("Python", ".gitignore"), ("Node", "node.gitignore")):
+        record_dump(
+            source=source,
+            clone_root=clone,
+            names=[name],
+            out_path=tmp_path / out,
+            lock_path=lock_path,
+            commit_sha=current_commit_sha(clone),
+        )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        check_module, "clone_or_pull", lambda s, _r: calls.append(s.name)
+    )
+    run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+    )
+    assert calls == ["gi"]  # one refresh for the shared source, not one per fragment

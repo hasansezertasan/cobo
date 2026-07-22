@@ -102,3 +102,17 @@ def test_lockfile_rejects_duplicate_fragment_paths() -> None:
     frag = Fragment(path=".gitignore", source="gitignore", files=(_file(),))
     with pytest.raises(ValueError, match="duplicate fragment paths"):
         Lockfile(version=1, fragments=(frag, frag))
+
+
+@pytest.mark.parametrize("bad", ["../escape", "a/../../etc", "/abs/path", "a\\b"])
+def test_locked_file_rejects_unsafe_path(bad: str) -> None:
+    """A traversal/absolute/backslash repo path is rejected at construction."""
+    with pytest.raises(ValueError, match=r"LockedFile\.path"):
+        LockedFile(name="Python", path=bad, commit="a" * 40, blob="b" * 40)
+
+
+@pytest.mark.parametrize("bad", ["../out", "nested/../../x", "/abs", "a\\b"])
+def test_fragment_rejects_unsafe_path(bad: str) -> None:
+    """A traversal/absolute/backslash output path is rejected (it is a write target)."""
+    with pytest.raises(ValueError, match=r"Fragment\.path"):
+        Fragment(path=bad, source="gitignore", files=(_file(),))

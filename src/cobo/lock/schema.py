@@ -27,17 +27,27 @@ def is_full_sha(value: str) -> bool:
     return _SHA_RE.fullmatch(value) is not None
 
 
-def _validate_repo_rel_path(path: str) -> None:
-    """Reject an empty, absolute, or non-POSIX (backslash) repo-relative path.
+def _validate_repo_rel_path(path: str, label: str = "LockedFile.path") -> None:
+    """Reject an unsafe relative path: empty, absolute, backslash, or ``..``.
+
+    Both a fragment's output path and a locked file's repo path are joined
+    directly onto a directory to form a write/read target (``lock_dir / path``),
+    and both come from a hand-editable ``cobo.lock`` — so a ``..`` segment or an
+    absolute path would let a lockfile escape its directory. Reject them at
+    construction, before ``sync`` ever writes.
 
     Raises:
-        ValueError: When ``path`` is empty, absolute, or contains a backslash.
+        ValueError: When ``path`` is empty, absolute, contains a backslash, or
+            contains a ``..`` segment.
     """
     if not path:
-        msg = "LockedFile.path must be non-empty"
+        msg = f"{label} must be non-empty"
         raise ValueError(msg)
     if path.startswith("/") or "\\" in path:
-        msg = f"LockedFile.path must be a repo-relative POSIX path, got {path!r}"
+        msg = f"{label} must be a relative POSIX path, got {path!r}"
+        raise ValueError(msg)
+    if ".." in path.split("/"):
+        msg = f"{label} must not contain '..' path segments, got {path!r}"
         raise ValueError(msg)
 
 
@@ -95,13 +105,12 @@ class Fragment:
         """Reject empty path/source and fragments that track no input files.
 
         Raises:
-            ValueError: When ``path``/``source`` are empty, ``files`` is empty
-                (a fragment with no inputs would render nothing), or two files
-                share the same ``path``.
+            ValueError: When ``path`` is empty/absolute/contains ``..`` (it is a
+                write target under the lockfile directory), ``source`` is empty,
+                ``files`` is empty (a fragment with no inputs would render
+                nothing), or two files share the same ``path``.
         """
-        if not self.path:
-            msg = "Fragment.path must be non-empty"
-            raise ValueError(msg)
+        _validate_repo_rel_path(self.path, "Fragment.path")
         if not self.source:
             msg = "Fragment.source must be non-empty"
             raise ValueError(msg)

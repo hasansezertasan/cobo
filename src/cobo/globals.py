@@ -230,6 +230,7 @@ def _result_to_dict(result: CheckResult) -> dict[str, object]:
         "outdated_count": result.outdated_count,
         "error_count": result.error_count,
         "locally_modified_count": result.locally_modified_count,
+        "sync_blocked_count": result.sync_blocked_count,
         "fragments": [
             {
                 "path": r.path,
@@ -282,10 +283,10 @@ def _print_check_table(result: CheckResult) -> None:
         table.add_row(r.path, r.source, _status_label(r))
     _console.print(table)
     _console.print(f"{result.outdated_count} fragment(s) need updating.")
-    if result.locally_modified_count:
+    if result.sync_blocked_count:
         _console.print(
-            f"{result.locally_modified_count} fragment(s) edited locally "
-            "(sync will refuse without --force)."
+            f"{result.sync_blocked_count} fragment(s) would block sync "
+            "(edited locally, or missing/broken markers) — re-dump or use --force."
         )
     if result.error_count:
         _console.print(f"{result.error_count} fragment(s) could not be evaluated.")

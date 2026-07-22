@@ -167,7 +167,12 @@ line-ending = "lf"
 preview = true
 
 [tool.ruff.lint]
-ignore = ["COM812", "CPY", "D203", "D213", "FIX", "TD"]
+# RUF105/RUF106 are preview rules that rewrite `# noqa: CODE` into the newer
+# `# ruff:ignore[rule-name]` syntax. They don't exist in the pinned ruff
+# (uv.lock) but a newer ruff in the prek hook enforces them, rewriting every
+# suppression comment repo-wide. Opt out until the syntax stabilises rather than
+# straddle two formats. (The pinned ruff warns "unknown selector" here — benign.)
+ignore = ["COM812", "CPY", "D203", "D213", "FIX", "RUF105", "RUF106", "TD"]
 fixable = ["ALL"]
 preview = true
 select = ["ALL"]

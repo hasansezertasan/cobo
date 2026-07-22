@@ -30,6 +30,10 @@ inputs:
       When "true", fail the workflow run if any fragment failed to re-render. The PR for the fragments that did succeed is still opened first; the run fails afterward. Defaults to "false" (isolate failures and stay green, surfacing them only in the PR body and the sync_failed output).
     required: false
     default: "false"
+outputs:
+  sync-failed:
+    description: '"true" when any fragment failed to re-render, else "false". Gate downstream steps on this to react to a partial update.'
+    value: ${{ steps.sync.outputs.sync_failed }}
 runs:
   using: composite
   steps:
@@ -58,13 +62,17 @@ runs:
         done
         # Capture the drift that motivates this PR *before* sync runs: sync
         # advances the lockfile, after which `check` would report nothing.
+        # Write to a temp file OUTSIDE the checkout so a repo file named
+        # `cobo-check.json` is never clobbered; hand the path to the body step.
+        report="$(mktemp "${RUNNER_TEMP:-/tmp}/cobo-check.XXXXXX.json")"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
         # `check` exits 1 on drift (the expected case here) so that is tolerated,
         # but exit >=2 means a real config error (no/invalid lockfile) — surface
         # it loudly instead of embedding an empty drift block into the PR body.
         check_rc=0
-        "${cobo[@]}" check --json "${exclude[@]}" > cobo-check.json || check_rc=$?
+        "${cobo[@]}" check --json "${exclude[@]}" > "$report" || check_rc=$?
         if [ "$check_rc" -ge 2 ]; then
-          cat cobo-check.json >&2 || true
+          cat "$report" >&2 || true
           exit "$check_rc"
         fi
         # Re-render outdated fragments. A non-zero exit means some fragment
@@ -85,6 +93,7 @@ runs:
       shell: bash
       env:
         SYNC_FAILED: ${{ steps.sync.outputs.sync_failed }}
+        REPORT: ${{ steps.sync.outputs.report }}
       run: |
         {
           echo "body<<EOF"
@@ -97,15 +106,15 @@ runs:
           fi
           echo "Drift detected before sync:"
           echo '```json'
-          if [ -f cobo-check.json ]; then
-            cat cobo-check.json
+          if [ -n "$REPORT" ] && [ -f "$REPORT" ]; then
+            cat "$REPORT"
           else
             echo '(no drift report produced)'
           fi
           echo '```'
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
-        rm -f cobo-check.json
+        rm -f "$REPORT"
     - name: Create pull request
       uses: peter-evans/create-pull-request@v7
       with:

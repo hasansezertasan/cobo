@@ -24,6 +24,14 @@ if TYPE_CHECKING:
 
 CloneRootProvider = Callable[(["Source"], Path)]
 
+# On-disk block states that ``managed.weave`` refuses (so ``sync`` needs
+# ``--force``). ABSENT is excluded — ``sync`` simply recreates a missing file.
+_SYNC_BLOCKED_STATES = frozenset({
+    BlockState.MODIFIED,
+    BlockState.MALFORMED,
+    BlockState.MISSING,
+})
+
 
 def is_excluded(path: str, patterns: Sequence[str]) -> bool:
     """Whether ``path`` matches any of the glob ``patterns``.
@@ -137,25 +145,37 @@ class CheckResult:
         """Number of fragments whose managed block was edited on disk.
 
         Returns:
-            Count of reports whose ``local_state`` is ``MODIFIED`` (a later
-            ``sync`` would refuse these without ``--force``).
+            Count of reports whose ``local_state`` is ``MODIFIED``.
         """
         return sum(1 for r in self.reports if r.local_state is BlockState.MODIFIED)
+
+    @property
+    def sync_blocked_count(self) -> int:
+        """Number of fragments a later ``sync`` would refuse without ``--force``.
+
+        Returns:
+            Count of reports whose ``local_state`` is MODIFIED (block edited),
+            MALFORMED (broken markers), or MISSING (no markers) — the three
+            states ``managed.weave`` rejects. ABSENT is excluded: ``sync``
+            recreates a missing output file.
+        """
+        return sum(1 for r in self.reports if r.local_state in _SYNC_BLOCKED_STATES)
 
     def exit_code(self, *, strict: bool = False) -> ExitCode:
         """Map this result to a process exit code.
 
         Args:
             strict: When True, an errored fragment (not just a drifted or
-                locally modified one) also yields a failure code — the CI-gate
+                sync-blocked one) also yields a failure code — the CI-gate
                 behavior of ``--strict``.
 
         Returns:
-            ``ExitCode.FAILURE`` when updates are available or a managed block
-            was edited locally (or, under ``strict``, when any fragment
-            errored); ``ExitCode.OK`` otherwise.
+            ``ExitCode.FAILURE`` when updates are available or a fragment's
+            on-disk block would block ``sync`` (edited/missing/broken markers)
+            (or, under ``strict``, when any fragment errored); ``ExitCode.OK``
+            otherwise.
         """
-        if self.outdated_count or self.locally_modified_count:
+        if self.outdated_count or self.sync_blocked_count:
             return ExitCode.FAILURE
         if strict and self.error_count:
             return ExitCode.FAILURE
@@ -163,15 +183,16 @@ class CheckResult:
 
 
 def gather_current_blobs(
-    fragment: Fragment, source: Source, clone_root: Path, *, refresh: bool
+    fragment: Fragment, clone_root: Path
 ) -> dict[str, BlobSha | None]:
     """Resolve the current blob SHA for each of a fragment's files.
 
+    Reads from an already-refreshed clone (the caller refreshes each source
+    once, in ``run_check``).
+
     Args:
         fragment: The fragment whose files to resolve.
-        source: The source to (optionally) refresh.
         clone_root: The source clone path.
-        refresh: When True, clone/pull before reading blobs.
 
     Returns:
         Map of repo-relative path -> current blob SHA, or None when the file is
@@ -179,12 +200,9 @@ def gather_current_blobs(
 
     Note:
         Only an absent path (``FileAbsentError``) is mapped to None. A broken
-        clone or failed refresh raises ``GitError`` from ``clone_or_pull`` /
-        ``blob_sha_for_path`` so it surfaces as a fragment error rather than as
-        phantom drift across every file.
+        clone raises ``GitError`` from ``blob_sha_for_path`` so it surfaces as a
+        fragment error rather than as phantom drift across every file.
     """
-    if refresh:
-        clone_or_pull(source, clone_root)
     blobs: dict[str, BlobSha | None] = {}
     for file in fragment.files:
         try:
@@ -192,6 +210,32 @@ def gather_current_blobs(
         except FileAbsentError:
             blobs[file.path] = None
     return blobs
+
+
+def _refresh_sources(
+    frags: list[Fragment],
+    sources: Mapping[str, Source],
+    clone_root_provider: CloneRootProvider,
+) -> dict[str, str]:
+    """Clone/pull each unique source once; return per-source refresh errors.
+
+    Refreshing per unique source (rather than per fragment) avoids repeated
+    network round-trips when several fragments share one upstream repo.
+
+    Returns:
+        Map of source name -> error message for sources whose refresh failed;
+        an unknown source is skipped (reported per fragment instead).
+    """
+    errors: dict[str, str] = {}
+    for name in dict.fromkeys(frag.source for frag in frags):
+        source = sources.get(name)
+        if source is None:
+            continue
+        try:
+            clone_or_pull(source, clone_root_provider(source))
+        except GitError as exc:
+            errors[name] = str(exc)
+    return errors
 
 
 def run_check(  # noqa: PLR0913
@@ -209,7 +253,8 @@ def run_check(  # noqa: PLR0913
         lock: The parsed lockfile.
         sources: Resolved sources keyed by name.
         clone_root_provider: Maps a Source to its clone path.
-        refresh: When True, refresh each source clone before reading blobs.
+        refresh: When True, refresh each unique source clone once before reading
+            blobs (not once per fragment).
         exclude: Glob patterns; matching fragments are skipped entirely (not
             evaluated and absent from the result).
         lock_dir: Directory the fragment output paths are relative to. When
@@ -220,9 +265,13 @@ def run_check(  # noqa: PLR0913
     Returns:
         A CheckResult with one report per non-excluded fragment.
     """
-    reports: list[FragmentReport] = [
-        _check_fragment(frag, sources, clone_root_provider, refresh, lock_dir)
-        for frag in selected_fragments(lock, exclude)
+    frags = selected_fragments(lock, exclude)
+    refresh_errors = (
+        _refresh_sources(frags, sources, clone_root_provider) if refresh else {}
+    )
+    reports = [
+        _check_fragment(frag, sources, clone_root_provider, refresh_errors, lock_dir)
+        for frag in frags
     ]
     return CheckResult(tuple(reports))
 
@@ -231,16 +280,16 @@ def _check_fragment(
     frag: Fragment,
     sources: Mapping[str, Source],
     clone_root_provider: CloneRootProvider,
-    refresh: bool,  # noqa: FBT001
+    refresh_errors: Mapping[str, str],
     lock_dir: Path | None,
 ) -> FragmentReport:
-    """Evaluate one fragment.
+    """Evaluate one fragment against its already-refreshed source clone.
 
     Args:
         frag: The fragment to evaluate.
         sources: Resolved sources keyed by name.
         clone_root_provider: Maps a Source to its clone path.
-        refresh: When True, refresh the clone before reading blobs.
+        refresh_errors: Per-source refresh failures from ``_refresh_sources``.
         lock_dir: Directory output paths are relative to (for local-state
             classification), or None to skip it.
 
@@ -258,10 +307,17 @@ def _check_fragment(
         )
     if not frag.update:
         return FragmentReport(path=frag.path, source=frag.source, held=True, drifts=())
-    try:
-        blobs = gather_current_blobs(
-            frag, source, clone_root_provider(source), refresh=refresh
+    refresh_error = refresh_errors.get(frag.source)
+    if refresh_error is not None:
+        return FragmentReport(
+            path=frag.path,
+            source=frag.source,
+            held=False,
+            drifts=(),
+            error=refresh_error,
         )
+    try:
+        blobs = gather_current_blobs(frag, clone_root_provider(source))
     except GitError as exc:
         return FragmentReport(
             path=frag.path, source=frag.source, held=False, drifts=(), error=str(exc)

@@ -21,13 +21,16 @@ for pattern in "${patterns[@]+"${patterns[@]}"}"; do
 done
 
 # Capture the drift that motivates the update *before* sync advances the lock.
+# Write to a temp file OUTSIDE the workspace so a repo file named
+# `cobo-check.json` is never clobbered.
+report="$(mktemp "${RUNNER_TEMP:-/tmp}/cobo-check.XXXXXX.json")"
 # `check` exits 1 on drift (expected) so that is tolerated, but exit >=2 means a
 # real config error (no/invalid lockfile) — surface it instead of emitting an
 # empty drift block.
 check_rc=0
-cobo check --json "${exclude[@]}" >cobo-check.json || check_rc=$?
+cobo check --json "${exclude[@]}" >"$report" || check_rc=$?
 if [ "$check_rc" -ge 2 ]; then
-  cat cobo-check.json >&2 || true
+  cat "$report" >&2 || true
   exit "$check_rc"
 fi
 
@@ -50,8 +53,8 @@ echo "sync-failed=$sync_failed" >>"$GITHUB_OUTPUT"
   fi
   echo "Drift detected before sync:"
   echo '```json'
-  if [ -f cobo-check.json ]; then
-    cat cobo-check.json
+  if [ -f "$report" ]; then
+    cat "$report"
   else
     echo '(no drift report produced)'
   fi
@@ -59,4 +62,4 @@ echo "sync-failed=$sync_failed" >>"$GITHUB_OUTPUT"
   echo "COBO_EOF"
 } >>"$GITHUB_OUTPUT"
 
-rm -f cobo-check.json
+rm -f "$report"

@@ -27,3 +27,12 @@ class FileAbsentError(GitError):
 
 class ConfigError(CoboError):
     """Raised when configuration is malformed or missing required fields."""
+
+
+class ManagedBlockError(UserError):
+    """Raised when a tracked file's cobo managed-region markers are unusable.
+
+    Covers a file with no markers, malformed or duplicated markers, or a
+    managed block whose content was hand-edited (hash mismatch). ``cobo sync``
+    turns this into a per-fragment refusal rather than clobbering the file.
+    """

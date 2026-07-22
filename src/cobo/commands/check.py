@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from cobo.errors import FileAbsentError, GitError
 from cobo.exit_codes import ExitCode
 from cobo.lock.diff import compute_fragment_drift
+from cobo.sources import managed
+from cobo.sources.managed import BlockState
 from cobo.sources.repo import blob_sha_for_path, clone_or_pull
 
 if TYPE_CHECKING:
@@ -59,6 +61,8 @@ class FragmentReport:
         held: True when update=False (skipped).
         drifts: Files whose content changed (empty when clean or held).
         error: Non-None when the fragment could not be evaluated.
+        local_state: On-disk managed-block state, or None when not evaluated
+            (held, errored, or the check ran without a lock directory).
     """
 
     path: str
@@ -66,6 +70,7 @@ class FragmentReport:
     held: bool
     drifts: tuple[FileDrift, ...]
     error: str | None = None
+    local_state: BlockState | None = None
 
     def __post_init__(self) -> None:
         """Enforce that held / errored / drifted are mutually exclusive states.
@@ -127,18 +132,32 @@ class CheckResult:
         """
         return sum(1 for r in self.reports if r.error is not None)
 
+    @property
+    def locally_modified_count(self) -> int:
+        """Number of fragments whose managed block was edited on disk.
+
+        Returns:
+            Count of reports whose ``local_state`` is ``MODIFIED`` (a later
+            ``sync`` would refuse these without ``--force``).
+        """
+        return sum(1 for r in self.reports if r.local_state is BlockState.MODIFIED)
+
     def exit_code(self, *, strict: bool = False) -> ExitCode:
         """Map this result to a process exit code.
 
         Args:
-            strict: When True, an errored fragment (not just a drifted one)
-                also yields a failure code — the CI-gate behavior of ``--strict``.
+            strict: When True, an errored fragment (not just a drifted or
+                locally modified one) also yields a failure code — the CI-gate
+                behavior of ``--strict``.
 
         Returns:
-            ``ExitCode.FAILURE`` when updates are available (or, under
-            ``strict``, when any fragment errored); ``ExitCode.OK`` otherwise.
+            ``ExitCode.FAILURE`` when updates are available or a managed block
+            was edited locally (or, under ``strict``, when any fragment
+            errored); ``ExitCode.OK`` otherwise.
         """
-        if self.outdated_count or (strict and self.error_count):
+        if self.outdated_count or self.locally_modified_count:
+            return ExitCode.FAILURE
+        if strict and self.error_count:
             return ExitCode.FAILURE
         return ExitCode.OK
 
@@ -175,13 +194,14 @@ def gather_current_blobs(
     return blobs
 
 
-def run_check(
+def run_check(  # noqa: PLR0913
     lock: Lockfile,
     sources: Mapping[str, Source],
     clone_root_provider: CloneRootProvider,
     *,
     refresh: bool = True,
     exclude: Sequence[str] = (),
+    lock_dir: Path | None = None,
 ) -> CheckResult:
     """Check every fragment for drift.
 
@@ -192,12 +212,16 @@ def run_check(
         refresh: When True, refresh each source clone before reading blobs.
         exclude: Glob patterns; matching fragments are skipped entirely (not
             evaluated and absent from the result).
+        lock_dir: Directory the fragment output paths are relative to. When
+            given, each evaluated fragment's on-disk managed block is also
+            classified (populating ``FragmentReport.local_state``); omit to
+            check upstream drift only.
 
     Returns:
         A CheckResult with one report per non-excluded fragment.
     """
     reports: list[FragmentReport] = [
-        _check_fragment(frag, sources, clone_root_provider, refresh)
+        _check_fragment(frag, sources, clone_root_provider, refresh, lock_dir)
         for frag in selected_fragments(lock, exclude)
     ]
     return CheckResult(tuple(reports))
@@ -208,6 +232,7 @@ def _check_fragment(
     sources: Mapping[str, Source],
     clone_root_provider: CloneRootProvider,
     refresh: bool,  # noqa: FBT001
+    lock_dir: Path | None,
 ) -> FragmentReport:
     """Evaluate one fragment.
 
@@ -216,6 +241,8 @@ def _check_fragment(
         sources: Resolved sources keyed by name.
         clone_root_provider: Maps a Source to its clone path.
         refresh: When True, refresh the clone before reading blobs.
+        lock_dir: Directory output paths are relative to (for local-state
+            classification), or None to skip it.
 
     Returns:
         Its FragmentReport (held, errored, clean, or drifted).
@@ -244,4 +271,31 @@ def _check_fragment(
         source=frag.source,
         held=False,
         drifts=compute_fragment_drift(frag, blobs),
+        local_state=_local_state(frag, source, lock_dir),
     )
+
+
+def _local_state(
+    frag: Fragment, source: Source, lock_dir: Path | None
+) -> BlockState | None:
+    """Classify a fragment's on-disk managed block.
+
+    Args:
+        frag: The fragment being evaluated.
+        source: Its resolved source (for the comment prefix).
+        lock_dir: Directory the output path is relative to, or None to skip.
+
+    Returns:
+        The BlockState of the output file, ABSENT when it is missing, or None
+        when ``lock_dir`` is None or the file cannot be read.
+    """
+    if lock_dir is None:
+        return None
+    target = lock_dir / frag.path
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return BlockState.ABSENT
+    except OSError:
+        return None
+    return managed.classify(text, source.comment_prefix)

@@ -10,6 +10,7 @@ from cobo.errors import GitError, UserError
 from cobo.exit_codes import ExitCode
 from cobo.lock.io import write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
+from cobo.sources import managed
 from cobo.sources.render import dump_locked as render_dump_locked
 from cobo.sources.repo import blob_sha_for_path, current_commit_sha
 
@@ -94,6 +95,7 @@ def run_sync(  # noqa: C901,PLR0913
     lock_path: Path,
     dry_run: bool = False,
     refresh: bool = True,
+    force: bool = False,
     exclude: Sequence[str] = (),
 ) -> SyncResult:
     """Re-render outdated fragments and advance the lockfile.
@@ -106,6 +108,8 @@ def run_sync(  # noqa: C901,PLR0913
         lock_path: Where to write the updated lockfile.
         dry_run: When True, compute changes but write nothing.
         refresh: Forwarded to the underlying check (refresh clones).
+        force: When True, overwrite a locally edited managed block instead of
+            refusing, and rebuild a file whose markers are missing/malformed.
         exclude: Glob patterns; matching fragments are left untouched in both
             the working tree and the rewritten lockfile.
 
@@ -145,6 +149,7 @@ def run_sync(  # noqa: C901,PLR0913
                 clone_root_provider,
                 lock_dir,
                 dry_run=dry_run,
+                force=force,
             )
         except (UserError, GitError, OSError) as exc:
             failed.append(FailedFragment(path=frag.path, reason=str(exc)))
@@ -172,19 +177,26 @@ def run_sync(  # noqa: C901,PLR0913
     return SyncResult(changed=tuple(changed), failed=tuple(failed), check=result)
 
 
-def _rerender(
+def _rerender(  # noqa: PLR0913
     frag: Fragment,
     source: Source,
     clone_root_provider: CloneRootProvider,
     lock_dir: Path,
     *,
     dry_run: bool,
+    force: bool,
 ) -> Fragment:
     """Re-render one fragment's output and return its advanced lock entry.
 
-    Propagates ``UserError``, ``GitError`` (including ``FileAbsentError``), or
-    ``OSError`` from ``render_dump_locked``, ``blob_sha_for_path``, or the file
-    write when a file has been removed upstream, the clone is unreadable, or the
+    The freshly rendered content is woven back into the existing file's managed
+    block (``managed.weave``), preserving any user content outside it. A locally
+    edited block, or missing/malformed markers, raises ``ManagedBlockError``
+    unless ``force`` is set.
+
+    Propagates ``UserError`` (including ``ManagedBlockError``), ``GitError``
+    (including ``FileAbsentError``), or ``OSError`` from ``render_dump_locked``,
+    ``managed.weave``, ``blob_sha_for_path``, or the file write when the block
+    was edited, a file was removed upstream, the clone is unreadable, or the
     output path is unwritable. An unexpected ``CoboError`` subtype is *not*
     caught here, so a genuine defect surfaces rather than being absorbed into a
     per-fragment failure.
@@ -196,8 +208,13 @@ def _rerender(
     commit = current_commit_sha(clone_root)
     repo_rel_paths = [f.path for f in frag.files]
     content = render_dump_locked(source, clone_root, repo_rel_paths, commit)
+    target = lock_dir / frag.path
+    existing = target.read_text(encoding="utf-8") if target.exists() else None
+    # Weave first (even in dry-run) so a refusal surfaces before anything is
+    # written; only the write itself is skipped under dry-run.
+    payload = managed.weave(existing, content, source.comment_prefix, force=force)
     if not dry_run:
-        (lock_dir / frag.path).write_bytes(content.encode("utf-8"))
+        target.write_bytes(payload.encode("utf-8"))
     new_files = tuple(
         LockedFile(
             name=f.name,

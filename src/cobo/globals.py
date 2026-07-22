@@ -20,6 +20,7 @@ from cobo.errors import ConfigError, GitError, UserError
 from cobo.exit_codes import ExitCode
 from cobo.lock.io import find_lock, read_lock
 from cobo.paths import source_clone_root
+from cobo.sources.managed import BlockState
 from cobo.sources.repo import clone_or_pull
 
 if TYPE_CHECKING:
@@ -210,6 +211,7 @@ def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
             config.sources,
             _clone_root_provider,
             exclude=exclude,
+            lock_dir=lock_path.parent,
         )
         if json_output:
             typer.echo(json.dumps(_result_to_dict(result)))
@@ -227,6 +229,7 @@ def _result_to_dict(result: CheckResult) -> dict[str, object]:
     return {
         "outdated_count": result.outdated_count,
         "error_count": result.error_count,
+        "locally_modified_count": result.locally_modified_count,
         "fragments": [
             {
                 "path": r.path,
@@ -234,6 +237,7 @@ def _result_to_dict(result: CheckResult) -> dict[str, object]:
                 "held": r.held,
                 "outdated": r.outdated,
                 "error": r.error,
+                "local_state": r.local_state.value if r.local_state else None,
                 "files": [
                     {"name": d.name, "old_blob": d.old_blob, "new_blob": d.new_blob}
                     for d in r.drifts
@@ -244,20 +248,31 @@ def _result_to_dict(result: CheckResult) -> dict[str, object]:
     }
 
 
+_LOCAL_LABELS = {
+    BlockState.MODIFIED: "locally modified",
+    BlockState.MISSING: "no cobo markers",
+    BlockState.MALFORMED: "malformed markers",
+    BlockState.ABSENT: "file missing",
+}
+
+
 def _status_label(report: FragmentReport) -> str:
     """Return the human-readable status cell for one fragment report.
 
     Returns:
-        One of: an error string, ``held``, ``outdated (N file(s))``, or
-        ``up to date``.
+        An error string or ``held``; otherwise the drift status
+        (``outdated (N file(s))`` or ``up to date``) with any local managed-block
+        issue appended (e.g. ``up to date; locally modified``).
     """
     if report.error is not None:
         return f"error: {report.error}"
     if report.held:
         return "held"
-    if report.outdated:
-        return f"outdated ({len(report.drifts)} file(s))"
-    return "up to date"
+    drift = (
+        f"outdated ({len(report.drifts)} file(s))" if report.outdated else "up to date"
+    )
+    local = _LOCAL_LABELS.get(report.local_state) if report.local_state else None
+    return f"{drift}; {local}" if local is not None else drift
 
 
 def _print_check_table(result: CheckResult) -> None:
@@ -267,6 +282,11 @@ def _print_check_table(result: CheckResult) -> None:
         table.add_row(r.path, r.source, _status_label(r))
     _console.print(table)
     _console.print(f"{result.outdated_count} fragment(s) need updating.")
+    if result.locally_modified_count:
+        _console.print(
+            f"{result.locally_modified_count} fragment(s) edited locally "
+            "(sync will refuse without --force)."
+        )
     if result.error_count:
         _console.print(f"{result.error_count} fragment(s) could not be evaluated.")
 
@@ -279,6 +299,12 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
             "--dry-run",
             help="Show what would change without writing.",
         ),
+        force: bool = typer.Option(  # noqa: FBT001
+            False,  # noqa: FBT003
+            "--force",
+            help="Overwrite a locally edited managed block (and rebuild files "
+            "whose cobo markers are missing or malformed) instead of refusing.",
+        ),
         exclude: list[str] = typer.Option(  # noqa: B008
             [],
             "--exclude",
@@ -289,8 +315,9 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
 
         Raises:
             Exit: Code 2 when no cobo.lock is found or it is malformed; code 1
-                when any fragment failed to re-render or the lockfile could not
-                be written back after re-rendering; code 0 otherwise.
+                when any fragment failed to re-render (including a fragment
+                whose managed block was edited locally, unless --force) or the
+                lockfile could not be written back; code 0 otherwise.
         """
         lock_path = find_lock(Path.cwd())
         if lock_path is None:
@@ -304,6 +331,7 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
                 lock_dir=lock_path.parent,
                 lock_path=lock_path,
                 dry_run=dry_run,
+                force=force,
                 exclude=exclude,
             )
         except UserError as exc:

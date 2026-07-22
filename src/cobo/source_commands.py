@@ -11,6 +11,7 @@ from cobo.commands.record import record_dump, resolve_lock_path
 from cobo.config.schema import Source
 from cobo.errors import ConfigError, GitError, UserError
 from cobo.exit_codes import ExitCode
+from cobo.sources import managed
 from cobo.sources.discover import list_boilerplates, search_boilerplates
 from cobo.sources.render import dump as render_dump
 from cobo.sources.repo import clone_or_pull, current_commit_sha
@@ -135,9 +136,19 @@ def _register_dump(  # noqa: C901
         if out is None:
             typer.echo(content, nl=False)
             return
+        # With --lock the file becomes sync-managed: wrap the render in managed
+        # markers so `cobo sync` can later refresh it without clobbering user
+        # edits. Re-dumping over an existing well-formed managed file preserves
+        # that file's user content; anything else is written fresh.
+        payload = content
+        if lock:
+            existing = out.read_text(encoding="utf-8") if out.exists() else None
+            payload = managed.weave(
+                existing, content, source.comment_prefix, force=True
+            )
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(content.encode("utf-8"))
+            out.write_bytes(payload.encode("utf-8"))
         except OSError as exc:
             typer.echo(f"Could not write {out}: {exc}", err=True)
             raise typer.Exit(ExitCode.FAILURE) from exc

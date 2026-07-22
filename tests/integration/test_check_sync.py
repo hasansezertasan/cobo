@@ -23,6 +23,7 @@ from cobo.globals import attach_globals
 from cobo.lock.io import read_lock, write_lock
 from cobo.lock.schema import Fragment, LockedFile, Lockfile, is_full_sha
 from cobo.source_commands import build_source_subapp
+from cobo.sources import managed
 from cobo.sources.render import dump as render_dump
 from cobo.sources.repo import clone_or_pull, current_commit_sha
 
@@ -33,6 +34,16 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 runner = CliRunner()
+
+
+def _body(path: Path, source: Source) -> str:
+    """Return the managed-block body of a tracked file (markers stripped).
+
+    Returns:
+        The content cobo owns between the begin/end markers.
+    """
+    text = path.read_text(encoding="utf-8")
+    return managed.parse(text, source.comment_prefix).body
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -140,7 +151,7 @@ def test_dump_out_and_lock_writes_file_and_records(
     sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
     result = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
     assert result.exit_code == 0, result.output
-    assert out.read_text(encoding="utf-8") == "*.pyc\n"
+    assert _body(out, source) == "*.pyc\n"
     lock = read_lock(tmp_path / "cobo.lock")
     assert lock.fragments[0].path == ".gitignore"
     assert lock.fragments[0].files[0].name == "Python"
@@ -279,7 +290,7 @@ def test_sync_rewrites_file_and_advances_lock(tmp_path: Path) -> None:
         lock_path=lock_path,
     )
     assert result.changed == (".gitignore",)
-    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "*.pyc\n*.pyo\n"
+    assert _body(tmp_path / ".gitignore", source) == "*.pyc\n*.pyo\n"
     assert read_lock(lock_path).fragments[0].files[0].blob != old_blob
 
 
@@ -290,7 +301,8 @@ def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
     lock_path = _record(tmp_path, source, clone, ["Python"])
     old_commit = read_lock(lock_path).fragments[0].files[0].commit
     out = tmp_path / ".gitignore"
-    out.write_text("*.pyc\n", encoding="utf-8")
+    before = managed.wrap("*.pyc\n", source.comment_prefix)
+    out.write_text(before, encoding="utf-8")
     advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
 
     result = run_sync(
@@ -302,7 +314,7 @@ def test_sync_dry_run_writes_nothing(tmp_path: Path) -> None:
         dry_run=True,
     )
     assert result.changed == (".gitignore",)
-    assert out.read_text(encoding="utf-8") == "*.pyc\n"  # unchanged
+    assert out.read_text(encoding="utf-8") == before  # unchanged
     assert read_lock(lock_path).fragments[0].files[0].commit == old_commit
 
 
@@ -401,9 +413,7 @@ def test_sync_isolates_one_fragment_advances_sibling(tmp_path: Path) -> None:
     py = next(f for f in lock.fragments if f.path == ".gitignore")
     assert node.files[0].blob != old_node_blob  # survivor advanced
     assert py.files[0].path == "Python.gitignore"  # failed entry untouched
-    assert (tmp_path / "node.gitignore").read_text(
-        encoding="utf-8"
-    ) == "node_modules/\ndist/\n"
+    assert _body(tmp_path / "node.gitignore", source) == "node_modules/\ndist/\n"
 
 
 def test_sync_rerenders_multi_file_fragment_on_partial_drift(tmp_path: Path) -> None:
@@ -734,7 +744,7 @@ def test_sync_renders_locked_path_not_rediscovered_name(tmp_path: Path) -> None:
     )
     assert result.changed == (".gitignore",)
     # Content must come from the LOCKED nested path, not the rediscovered root file.
-    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "NESTED2\n"
+    assert _body(tmp_path / ".gitignore", source) == "NESTED2\n"
     assert read_lock(lock_path).fragments[0].files[0].path == "sub/Python.gitignore"
 
 
@@ -864,7 +874,7 @@ def test_sync_lock_write_failure_raises_user_error(
             lock_path=lock_path,
         )
     # The working tree was modified even though the lock did not advance.
-    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "*.pyc\n*.pyo\n"
+    assert _body(tmp_path / ".gitignore", source) == "*.pyc\n*.pyo\n"
 
 
 def _global_app(
@@ -916,7 +926,7 @@ def test_sync_cli_real_drift_advances_and_exits_0(
     result = runner.invoke(_global_app(source, clone, monkeypatch, tmp_path), ["sync"])
     assert result.exit_code == 0, result.output
     assert "updated: .gitignore" in result.output
-    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == "*.pyc\n*.pyo\n"
+    assert _body(tmp_path / ".gitignore", source) == "*.pyc\n*.pyo\n"
 
 
 def test_dump_lock_with_malformed_existing_lock_exits_2(
@@ -988,3 +998,213 @@ def test_check_multi_file_fragment_one_input_deleted_reports_drift(
     assert report.outdated
     assert {d.path for d in report.drifts} == {"Node.gitignore"}
     assert report.drifts[0].new_blob is None
+
+
+def _dump_managed(tmp_path: Path, source: Source, clone: Path, name: str) -> Path:
+    """Dump a single boilerplate to `.gitignore` with --lock; return the path.
+
+    Returns:
+        The written, managed output file.
+    """
+    out = tmp_path / ".gitignore"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", name, "--out", str(out), "--lock"])
+    assert result.exit_code == 0, result.output
+    return out
+
+
+def test_sync_preserves_user_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user's content below the end marker survives a block-refreshing sync."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    out.write_text(
+        out.read_text(encoding="utf-8") + "my/custom/rule\n", encoding="utf-8"
+    )
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    lock_path = tmp_path / "cobo.lock"
+
+    result = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert result.changed == (".gitignore",)
+    parsed = managed.parse(out.read_text(encoding="utf-8"), source.comment_prefix)
+    assert parsed.body == "*.pyc\n*.pyo\n"  # block refreshed
+    assert parsed.tail == "my/custom/rule\n"  # user tail preserved
+
+
+def test_sync_refuses_locally_edited_block_then_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand-edited managed block is refused; --force overwrites it."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    out.write_text(
+        out.read_text(encoding="utf-8").replace("*.pyc", "*.HACKED"), encoding="utf-8"
+    )
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+    lock_path = tmp_path / "cobo.lock"
+
+    refused = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert refused.changed == ()
+    assert tuple(f.path for f in refused.failed) == (".gitignore",)
+    assert "edited locally" in refused.failed[0].reason
+    assert "*.HACKED" in out.read_text(encoding="utf-8")  # untouched
+
+    forced = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+        force=True,
+    )
+    assert forced.changed == (".gitignore",)
+    assert _body(out, source) == "*.pyc\n*.pyo\n"
+
+
+def test_sync_refuses_missing_markers_then_force(tmp_path: Path) -> None:
+    """A tracked file with no markers is refused; --force rebuilds it fresh."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])
+    out = tmp_path / ".gitignore"
+    out.write_text("hand-written, no markers\n", encoding="utf-8")  # legacy file
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    refused = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+    )
+    assert refused.changed == ()
+    assert "no cobo" in refused.failed[0].reason
+
+    forced = run_sync(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+        lock_path=lock_path,
+        force=True,
+    )
+    assert forced.changed == (".gitignore",)
+    assert _body(out, source) == "*.pyc\n*.pyo\n"
+    assert "hand-written" not in out.read_text(encoding="utf-8")
+
+
+def test_dump_lock_redump_preserves_user_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-running `dump --lock` over an existing managed file keeps the user tail."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    out.write_text(out.read_text(encoding="utf-8") + "keep-me\n", encoding="utf-8")
+
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    redump = runner.invoke(sub, ["dump", "Python", "--out", str(out), "--lock"])
+    assert redump.exit_code == 0, redump.output
+    parsed = managed.parse(out.read_text(encoding="utf-8"), source.comment_prefix)
+    assert parsed.tail == "keep-me\n"
+
+
+def test_check_reports_locally_modified_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Check flags a hand-edited managed block and fails (exit 1)."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    out.write_text(
+        out.read_text(encoding="utf-8").replace("*.pyc", "*.HACKED"), encoding="utf-8"
+    )
+    lock_path = tmp_path / "cobo.lock"
+
+    result = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+    )
+    assert result.reports[0].local_state is managed.BlockState.MODIFIED
+    assert result.locally_modified_count == 1
+    assert result.exit_code() == 1
+
+
+def test_check_local_state_absent_and_unreadable(tmp_path: Path) -> None:
+    """Check maps a missing output to ABSENT and an unreadable one to None."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    lock_path = _record(tmp_path, source, clone, ["Python"])  # lock only, no file
+
+    absent = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+    )
+    assert absent.reports[0].local_state is managed.BlockState.ABSENT
+
+    (tmp_path / ".gitignore").mkdir()  # a directory: read_text raises OSError
+    unreadable = run_check(
+        read_lock(lock_path),
+        {source.name: source},
+        _provider_factory(clone),
+        lock_dir=tmp_path,
+    )
+    assert unreadable.reports[0].local_state is None
+
+
+def test_sync_cli_force_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`cobo sync --force` overwrites a locally edited block via the CLI."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    out.write_text(
+        out.read_text(encoding="utf-8").replace("*.pyc", "*.HACKED"), encoding="utf-8"
+    )
+    advance_source(tmp_path, "Python.gitignore", "*.pyc\n*.pyo\n")
+
+    app = _global_app(source, clone, monkeypatch, tmp_path)
+    refused = runner.invoke(app, ["sync"])
+    assert refused.exit_code == 1, refused.output
+    forced = runner.invoke(app, ["sync", "--force"])
+    assert forced.exit_code == 0, forced.output
+    assert _body(out, source) == "*.pyc\n*.pyo\n"
+
+
+def test_check_cli_reports_locally_modified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cobo check` surfaces a locally modified block in its summary and exits 1."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = _dump_managed(tmp_path, source, clone, "Python")
+    out.write_text(
+        out.read_text(encoding="utf-8").replace("*.pyc", "*.HACKED"), encoding="utf-8"
+    )
+    result = runner.invoke(_global_app(source, clone, monkeypatch, tmp_path), ["check"])
+    assert result.exit_code == 1, result.output
+    assert "edited locally" in result.output

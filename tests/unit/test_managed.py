@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from cobo.errors import ManagedBlockError
 from cobo.sources import managed
 from cobo.sources.managed import BlockState
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -129,3 +134,21 @@ def test_markers_use_source_comment_prefix() -> None:
     text = managed.wrap("body\n", "//")
     assert text.startswith("// >>> cobo:begin >>>")
     assert managed.parse(text, "//").body == "body\n"
+
+
+def test_block_with_carriage_return_matches_only_when_read_as_bytes(
+    tmp_path: Path,
+) -> None:
+    r"""A block with an embedded '\r' round-trips as MATCH via a bytes read.
+
+    Regression: the macOS gitignore uses ``Icon\r`` as a lone-CR character class.
+    check/sync/dump must read managed files as bytes — reading via ``read_text``
+    translates the ``\r`` and makes an intact block hash-mismatch as MODIFIED.
+    """
+    path = tmp_path / "f"
+    path.write_bytes(managed.wrap("Icon[\r]\nkeep\n", _CP).encode("utf-8"))
+    as_bytes = path.read_bytes().decode("utf-8")
+    assert managed.classify(as_bytes, _CP) == BlockState.MATCH
+    # The trap this guards against: a text-mode read reports a false positive.
+    as_text = path.read_text(encoding="utf-8")
+    assert managed.classify(as_text, _CP) == BlockState.MODIFIED

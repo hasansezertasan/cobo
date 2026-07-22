@@ -142,7 +142,9 @@ def _register_dump(  # noqa: C901
         # that file's user content; anything else is written fresh.
         payload = content
         if lock:
-            existing = out.read_text(encoding="utf-8") if out.exists() else None
+            # Decode bytes directly to preserve an embedded ``\r`` (macOS
+            # ``Icon\r``); read_text would translate it and corrupt the block.
+            existing = out.read_bytes().decode("utf-8") if out.exists() else None
             payload = managed.weave(
                 existing, content, source.comment_prefix, force=True
             )

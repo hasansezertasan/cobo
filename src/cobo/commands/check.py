@@ -293,7 +293,10 @@ def _local_state(
         return None
     target = lock_dir / frag.path
     try:
-        text = target.read_text(encoding="utf-8")
+        # Decode bytes directly: read_text's universal-newline translation would
+        # collapse an embedded ``\r`` (e.g. macOS's ``Icon\r`` trick) and make an
+        # intact block hash-mismatch as if it were edited.
+        text = target.read_bytes().decode("utf-8")
     except FileNotFoundError:
         return BlockState.ABSENT
     except OSError:

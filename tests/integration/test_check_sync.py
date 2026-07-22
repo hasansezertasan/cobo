@@ -1208,3 +1208,18 @@ def test_check_cli_reports_locally_modified(
     result = runner.invoke(_global_app(source, clone, monkeypatch, tmp_path), ["check"])
     assert result.exit_code == 1, result.output
     assert "edited locally" in result.output
+
+
+def test_dump_out_write_failure_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed output write is a clean exit 1, not a raw traceback."""
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "a-directory"
+    out.mkdir()  # writing bytes to a directory raises OSError
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(sub, ["dump", "Python", "--out", str(out)])
+    assert result.exit_code == 1, result.output
+    assert "Could not write" in result.output

@@ -1,0 +1,21 @@
+---
+name: cobo smoke test
+# Manual-only: dogfoods the composite Action against this repo's own cobo.lock
+# (which tracks .gitignore). Verifies the full drift -> sync -> PR path on a real
+# runner using the action at THIS ref (uses: ./), not a published tag.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write  # push the update branch
+  pull-requests: write  # open the PR
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: ./
+        with:
+          fail-on-sync-error: "true"
+          branch: cobo/smoke-update
+          pr-title: "chore: cobo smoke test update"

@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from cobo import globals as cobo_globals
 from cobo.commands.check import CheckResult, FragmentReport
+from cobo.commands.lock_import import ImportedFile, ImportResult
 from cobo.commands.sync import FailedFragment, SyncResult
 from cobo.config.schema import CoboConfig, Source
 from cobo.errors import ConfigError, GitError, UserError
@@ -254,6 +255,29 @@ def test_lock_import_malformed_lock_exits_2(
     result = runner.invoke(app_with_globals(tmp_path), ["lock", "import", str(target)])
     assert result.exit_code == 2, result.output  # noqa: PLR2004
     assert "Malformed lockfile" in result.output
+
+
+def test_lock_import_success_echoes_imported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful import echoes each adopted file and exits 0."""
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / ".gitignore"
+    target.write_text("*.pyc\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cobo_globals,
+        "run_import",
+        MagicMock(
+            return_value=ImportResult(
+                imported=(ImportedFile(path=str(target), count=2),), failed=()
+            )
+        ),
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["lock", "import", str(target)])
+    assert result.exit_code == 0, result.output
+    assert "imported:" in result.output
+    assert "(2 file(s))" in result.output
 
 
 def test_check_outdated_exits_1(

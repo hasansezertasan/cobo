@@ -209,7 +209,9 @@ def _rerender(  # noqa: PLR0913
     repo_rel_paths = [f.path for f in frag.files]
     content = render_dump_locked(source, clone_root, repo_rel_paths, commit)
     target = lock_dir / frag.path
-    existing = target.read_text(encoding="utf-8") if target.exists() else None
+    # Decode bytes directly to preserve an embedded ``\r`` (e.g. macOS's
+    # ``Icon\r``); read_text would translate it and read as a tampered block.
+    existing = target.read_bytes().decode("utf-8") if target.exists() else None
     # Weave first (even in dry-run) so a refusal surfaces before anything is
     # written; only the write itself is skipped under dry-run.
     payload = managed.weave(existing, content, source.comment_prefix, force=force)

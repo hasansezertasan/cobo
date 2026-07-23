@@ -165,7 +165,10 @@ def _serialize(lock: Lockfile) -> str:
                 f"  blob = {_q(file.blob)}",
             ))
         lines.append("")
-    return "\n".join(lines) + "\n"
+    # Blank lines separate fragments; drop the trailing one so the file ends in
+    # exactly one newline (POSIX text-file convention; keeps end-of-file-fixer
+    # and other tooling from rewriting a cobo-generated lockfile).
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def _q(value: str) -> str:

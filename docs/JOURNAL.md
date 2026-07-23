@@ -232,3 +232,52 @@ the monolithic `publish` job into single-responsibility jobs.
   this before the next Release PR merges.
 
 ---
+
+## 2026-07-23 — Dogfood cobo on its own `.gitignore` (tracked `cobo.lock`)
+
+### Context
+
+Closes #100 — the retry of the dogfooding that #55 reverted. Goal: track cobo's
+own `.gitignore` with a committed `cobo.lock` + managed markers, so `check`/`sync`
+and the composite Action run continuously against a real fragment.
+
+### The blocker (why #55 reverted) and the fix
+
+`find_lock` walks **up** from `Path.cwd()` to the first `.git`. `tox` pointed
+pytest's `--basetemp` at `{env_tmp_dir}` (`.tox/tmp/...`, *inside* the repo), so
+`tmp_path` had the committed repo-root `cobo.lock` as an ancestor. Tests asserting
+"no lockfile found" (`test_find_lock_returns_none_when_absent`,
+`test_check_missing_lock_exits_2`) discovered it and failed — green under bare
+`pytest` (system temp), red under tox. Reproduced exactly, then fixed by **dropping
+`--basetemp` from the tox commands** so pytest uses its default basetemp under the
+system temp dir (outside the repo, every OS). A comment on `env_run_base` warns
+against re-pinning basetemp inside the repo. Full suite green under `tox -e 3.14`
+with the lock committed.
+
+### Regenerating `.gitignore` as a managed block
+
+The clone HEAD of `github/gitignore` still equals the pinned `dcc0fc7`, so a fresh
+`cobo gitignore dump macOS Windows Linux VisualStudioCode GitHubPages Node Python
+--out .gitignore --lock` reproduced the byte-identical cobo block, wrapped in
+`cobo:begin`/`cobo:end` markers, and wrote `cobo.lock`. **Gotcha:** `dump --lock`
+weaves with `force=True`, which *rebuilds from scratch* when the target has no
+markers (`managed.weave`), so the hand-authored tail (`src/**/_version.py`,
+`PyPI.md`, `mise.local.toml`) is dropped on this first conversion — it was captured
+beforehand and re-attached below the end marker. Re-dumps/`sync` now preserve it
+(markers present).
+
+### Dogfooding finding: prek vs. managed-block integrity
+
+The upstream templates carry a couple of trailing spaces (VisualStudioCode block).
+The `trailing-whitespace` prek hook would strip them *inside* the managed region,
+flipping `cobo check` to MODIFIED on the first commit. Excluded `.gitignore` from
+that one hook (`prek.toml`) so the block stays byte-faithful to upstream. A real
+bug the dogfooding surfaced, exactly as #100 predicted.
+
+### Continuous coverage
+
+Added a `dogfood` job to `ci.yml` that runs `uvx --from . cobo check` +
+`cobo sync --dry-run` — the same packaged-CLI invocation the composite Action uses
+(`action.yml`), without opening a PR. `check` tolerates exit 1 (upstream drift is
+actionable, not a failure) and fails only on exit ≥2, mirroring the Action's own
+`check_rc` handling; the dry-run `sync` fails only if a fragment cannot re-render.

@@ -254,7 +254,6 @@ commands = [
     "--tb=short",
     "-n",
     "0",
-    "--basetemp={env_tmp_dir}",
     "-m",
     "smoke",
   ],
@@ -267,7 +266,6 @@ commands = [
     "--tb=short",
     "-n",
     "0",
-    "--basetemp={env_tmp_dir}",
     "-m",
     "not smoke",
     { replace = "posargs", default = [
@@ -277,7 +275,11 @@ commands = [
 constrain_package_deps = true
 dependency_groups = ["test"]
 description = "Run the tests under {base_python}"
-env_tmp_dir = "{toxworkdir}/tmp/{envname}"
+# Do NOT pin pytest's --basetemp under the repo (e.g. {env_tmp_dir}, which lives
+# in .tox/). cobo dogfoods a committed repo-root cobo.lock, and find_lock() walks
+# up from tmp_path to the first .git; a basetemp inside the repo would let tests
+# asserting "no lockfile found" discover that dogfood lock and fail. Pytest's
+# default basetemp is under the system temp dir (outside the repo) on every OS.
 package = "wheel"
 runner = "uv-venv-runner"
 use_frozen_constraints = true

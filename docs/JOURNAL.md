@@ -17,7 +17,7 @@ Adopted the release pipeline from the sibling projects [olink](https://github.co
 - **Kept `check-pr-title.yml`**: it lints PR titles and is complementary to release-please (commit messages remain the release source of truth).
 
 ### Follow-ups (manual, outside the repo)
-- Configure the PyPI Trusted Publisher for `cobo`: workflow `release-please.yml`, environment `publish`.
+- Configure the PyPI Trusted Publisher for `cobo`: workflow `release.yml`, environment `publish`. (Was `release-please.yml`; see the 2026-07-23 rename below.)
 - Ensure a GitHub Environment named `publish` exists (the publish job references it).
 
 ---
@@ -197,5 +197,38 @@ files, so the format is a contract):
   integration coverage for tail preservation, tamper refusal + `--force`, missing
   markers, re-dump preservation, and `check` reporting. managed.py / sync.py /
   check.py at 100%; suite 239 tests, 99% total.
+
+---
+
+## 2026-07-23 — Split release workflow, rename to `release.yml`
+
+### Context
+Adopted the multi-job release-workflow shape from the sibling
+[keycast](https://github.com/hasansezertasan/keycast/blob/main/.github/workflows/release.yml)
+project: renamed `.github/workflows/release-please.yml` → `release.yml` and split
+the monolithic `publish` job into single-responsibility jobs.
+
+### Decisions
+- **Job split**: `release-please` → `build-package` (pure producer, uploads a
+  `dist-pypi` artifact) → `publish-pypi` (sole holder of `id-token: write` and the
+  `publish` environment) → `publish-release` (attaches `dist-*`, un-drafts) +
+  `publish-docker` (gated on `publish-pypi`, runs in parallel) → `reconcile`
+  (closes the phantom next-release PR and re-dispatches). Tighter permission
+  scoping: OIDC and the `publish` environment now live only on `publish-pypi`.
+- **`is_prerelease` detection + beta gating retained**: prereleases ship to PyPI +
+  the GitHub release but stay off the moving Docker tags (`:latest`, `:major`) and
+  off "Latest release". Inert while the beta channel is disabled in
+  `release-please-config.json`, binding if it is turned on.
+- **Action pins bumped** via `bunx actions-up`: `actions/upload-artifact` v7.0.1,
+  `actions/download-artifact` v8.0.1, `actions/checkout` v7.0.1, and
+  `peter-evans/create-pull-request` v8.1.1 in `action.yml`.
+
+### Follow-ups (manual, outside the repo)
+- **Update the PyPI Trusted Publisher workflow name from `release-please.yml` to
+  `release.yml`** (environment stays `publish`). The trusted-publisher identity is
+  keyed on the workflow *filename*; until PyPI is updated,
+  `uv publish --trusted-publishing always` cannot authenticate and every release
+  stalls as an unpublished draft (`publish-release` depends on `publish-pypi`). Do
+  this before the next Release PR merges.
 
 ---

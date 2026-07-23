@@ -2,7 +2,13 @@
 
 import pytest
 
-from cobo.errors import CoboError, ConfigError, GitError, UserError
+from cobo.errors import (
+    CoboError,
+    ConfigError,
+    FileAbsentError,
+    GitError,
+    UserError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -20,6 +26,11 @@ def test_git_error_is_cobo_error() -> None:
 def test_config_error_is_cobo_error() -> None:
     """ConfigError inherits from CoboError."""
     assert issubclass(ConfigError, CoboError)
+
+
+def test_file_absent_error_is_git_error() -> None:
+    """FileAbsentError subclasses GitError so `except GitError` still catches it."""
+    assert issubclass(FileAbsentError, GitError)
 
 
 def test_errors_carry_message() -> None:

@@ -1,0 +1,134 @@
+---
+name: cobo update fragments
+description: Re-render drifted cobo fragments and open a pull request.
+branding:
+  icon: refresh-cw
+  color: blue
+inputs:
+  config:
+    description: Path to a cobo config TOML (sets COBO_CONFIG). Optional.
+    required: false
+    default: ""
+  exclude:
+    description: Newline- or space-separated glob patterns of fragment paths to skip.
+    required: false
+    default: ""
+  pr-title:
+    description: Title for the opened pull request.
+    required: false
+    default: "chore: update cobo fragments"
+  pr-labels:
+    description: Comma-separated labels for the pull request.
+    required: false
+    default: cobo
+  branch:
+    description: Branch the action pushes updates to.
+    required: false
+    default: cobo/update-fragments
+  fail-on-sync-error:
+    description: >-
+      When "true", fail the workflow run if any fragment failed to re-render. The PR for the fragments that did succeed is still opened first; the run fails afterward. Defaults to "false" (isolate failures and stay green, surfacing them only in the PR body and the sync_failed output).
+    required: false
+    default: "false"
+outputs:
+  sync-failed:
+    description: '"true" when any fragment failed to re-render, else "false". Gate downstream steps on this to react to a partial update.'
+    value: ${{ steps.sync.outputs.sync_failed }}
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+    - name: Sync fragments
+      id: sync
+      shell: bash
+      env:
+        COBO_CONFIG: ${{ inputs.config }}
+        ACTION_PATH: ${{ github.action_path }}
+        COBO_EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        set -uo pipefail
+        # Run the cobo that ships with this action ref (not whatever is newest
+        # on PyPI), so the CLI and lockfile schema can never drift apart.
+        cobo=(uvx --from "$ACTION_PATH" cobo)
+        # Turn newline/space-separated exclude patterns into repeated --exclude.
+        read -ra patterns <<< "$COBO_EXCLUDE"
+        exclude=()
+        # `${arr[@]+"${arr[@]}"}` expands to nothing on an empty array, avoiding
+        # an `unbound variable` abort under `set -u` on bash < 4.4 (the default
+        # exclude is empty, and some runners/containers still ship old bash).
+        for pattern in "${patterns[@]+"${patterns[@]}"}"; do
+          exclude+=(--exclude "$pattern")
+        done
+        # Capture the drift that motivates this PR *before* sync runs: sync
+        # advances the lockfile, after which `check` would report nothing.
+        # Write to a temp file OUTSIDE the checkout so a repo file named
+        # `cobo-check.json` is never clobbered; hand the path to the body step.
+        report="$(mktemp "${RUNNER_TEMP:-/tmp}/cobo-check.XXXXXX.json")"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        # `check` exits 1 on drift (the expected case here) so that is tolerated,
+        # but exit >=2 means a real config error (no/invalid lockfile) — surface
+        # it loudly instead of embedding an empty drift block into the PR body.
+        check_rc=0
+        "${cobo[@]}" check --json "${exclude[@]}" > "$report" || check_rc=$?
+        if [ "$check_rc" -ge 2 ]; then
+          cat "$report" >&2 || true
+          exit "$check_rc"
+        fi
+        # Re-render outdated fragments. A non-zero exit means some fragment
+        # failed to re-render; still open a PR for the ones that succeeded and
+        # record the failure so it surfaces in the PR body instead of aborting.
+        # NOTE: this step intentionally exits 0 even when fragments fail, so a
+        # partial update still opens a PR. The failure is reported in the PR body
+        # and via the `sync_failed` step output. Set `fail-on-sync-error: true`
+        # to fail the run afterward (the "Fail on sync error" step below), or
+        # gate on the `sync_failed` output in a downstream step.
+        if "${cobo[@]}" sync "${exclude[@]}"; then
+          echo "sync_failed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "sync_failed=true" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Build PR body
+      id: body
+      shell: bash
+      env:
+        SYNC_FAILED: ${{ steps.sync.outputs.sync_failed }}
+        REPORT: ${{ steps.sync.outputs.report }}
+      run: |
+        {
+          echo "body<<EOF"
+          echo "Automated cobo fragment update."
+          echo
+          if [ "$SYNC_FAILED" = "true" ]; then
+            echo "> [!WARNING]"
+            echo "> Some fragments failed to re-render. See the workflow log."
+            echo
+          fi
+          echo "Drift detected before sync:"
+          echo '```json'
+          if [ -n "$REPORT" ] && [ -f "$REPORT" ]; then
+            cat "$REPORT"
+          else
+            echo '(no drift report produced)'
+          fi
+          echo '```'
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        rm -f "$REPORT"
+    - name: Create pull request
+      uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676  # v7
+      with:
+        title: ${{ inputs.pr-title }}
+        labels: ${{ inputs.pr-labels }}
+        branch: ${{ inputs.branch }}
+        body: ${{ steps.body.outputs.body }}
+        commit-message: ${{ inputs.pr-title }}
+    # Runs last, so the PR for the successful fragments is already opened before
+    # the run is failed. Only fires when the caller opted in.
+    - name: Fail on sync error
+      if: ${{ inputs.fail-on-sync-error == 'true' && steps.sync.outputs.sync_failed == 'true' }}
+      shell: bash
+      run: |
+        echo "::error::One or more cobo fragments failed to re-render;" \
+          "failing the run as requested by fail-on-sync-error." >&2
+        exit 1

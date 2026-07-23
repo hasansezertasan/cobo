@@ -167,18 +167,26 @@ line-ending = "lf"
 preview = true
 
 [tool.ruff.lint]
-# RUF105/RUF106 are preview rules that rewrite `# noqa: CODE` into the newer
-# `# ruff:ignore[rule-name]` syntax. They don't exist in the pinned ruff
-# (uv.lock) but a newer ruff in the prek hook enforces them, rewriting every
-# suppression comment repo-wide. Opt out until the syntax stabilises rather than
-# straddle two formats. (The pinned ruff warns "unknown selector" here — benign.)
-ignore = ["COM812", "CPY", "D203", "D213", "FIX", "RUF105", "RUF106", "TD"]
+# `noqa-comments` / `rule-codes-in-suppression-comments` (RUF105/RUF106) are
+# preview rules that would rewrite every `# noqa: CODE` into the newer
+# `# ruff:ignore[rule-name]` syntax repo-wide. Opt out until that syntax
+# stabilises rather than churn every suppression comment across the codebase.
+ignore = [
+  "missing-trailing-comma",
+  "CPY",
+  "incorrect-blank-line-before-class",
+  "multi-line-summary-second-line",
+  "FIX",
+  "noqa-comments",
+  "rule-codes-in-suppression-comments",
+  "TD",
+]
 fixable = ["ALL"]
 preview = true
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["S101"]
+"tests/*.py" = ["assert"]
 
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true

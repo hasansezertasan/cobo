@@ -5,7 +5,7 @@
 # with the action ref, this variant installs cobo from PyPI for a fast,
 # pre-bakeable image. Pin COBO_VERSION to the release matching your action ref
 # when lockfile-schema fidelity matters.
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # cobo shells out to git (via GitPython), which is absent from -slim images.
 RUN apt-get update \

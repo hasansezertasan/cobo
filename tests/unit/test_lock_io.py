@@ -51,6 +51,24 @@ def test_write_is_atomic_no_temp_left_behind(tmp_path: Path) -> None:
     assert [p.name for p in tmp_path.iterdir()] == [LOCK_FILENAME]
 
 
+def test_write_ends_in_single_newline(tmp_path: Path) -> None:
+    """A serialized lockfile ends in exactly one newline, not a blank line.
+
+    A trailing blank line makes end-of-file-fixer (and similar tooling) rewrite
+    a cobo-generated lockfile, which would dirty the tree on every ``sync``.
+    """
+    target = tmp_path / LOCK_FILENAME
+    write_lock(target, Lockfile(version=1, fragments=(_frag(), _frag("mise.toml"))))
+    text = target.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    assert not text.endswith("\n\n")
+    # An empty lockfile holds the same invariant.
+    write_lock(target, empty_lock())
+    empty = target.read_text(encoding="utf-8")
+    assert empty.endswith("\n")
+    assert not empty.endswith("\n\n")
+
+
 def test_find_lock_walks_upward(tmp_path: Path) -> None:
     """find_lock locates cobo.lock in a parent directory."""
     (tmp_path / LOCK_FILENAME).write_text("version = 1\n", encoding="utf-8")

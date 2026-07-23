@@ -80,3 +80,72 @@ jobs:
         with:
           files: ./coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
+  dogfood:
+    name: Dogfood cobo (check + dry-run sync)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Cache cobo source clones
+        # cobo clones each source (github/gitignore) into its user cache dir
+        # (~/.cache/cobo/sources/<name> on Linux). Cache it so check/sync only
+        # `git pull` the delta instead of a fresh full clone every run. Keyed on
+        # cobo.lock so a re-pin busts the cache; the restore-key reuses an older
+        # clone regardless (clone_or_pull refreshes it to HEAD anyway).
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ~/.cache/cobo
+          key: cobo-sources-${{ runner.os }}-${{ hashFiles('cobo.lock') }}
+          restore-keys: |
+            cobo-sources-${{ runner.os }}-
+      - name: cobo check + dry-run sync against the committed cobo.lock
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Exercise the packaged CLI exactly as the composite action does
+          # (`uvx --from <path> cobo`, see action.yml), against this repo's own
+          # committed cobo.lock / .gitignore. This continuously smoke-tests the
+          # dump/check/sync + managed-block machinery end-to-end on a real
+          # fragment, without opening a pull request.
+          cobo=(uvx --from . cobo)
+          # `check` collapses several states onto exit 1: benign upstream drift
+          # (an update is available), a locally corrupted managed block
+          # (edited body, or missing/broken markers → sync_blocked_count), and
+          # un-evaluable fragments (error_count). We must tolerate only the
+          # first — a damaged committed .gitignore is exactly what this job
+          # exists to catch, and a `sync --dry-run` alone would miss it because
+          # run_sync skips re-render (and thus marker validation) when nothing
+          # is outdated. So inspect the JSON rather than the exit code alone.
+          report="$(mktemp)"
+          rc=0
+          "${cobo[@]}" check --json > "$report" || rc=$?
+          if [ "$rc" -ge 2 ]; then
+            echo "::error::cobo check failed against the committed cobo.lock (exit $rc)." >&2
+            cat "$report" >&2 || true
+            exit "$rc"
+          fi
+          blocked=$(jq '.sync_blocked_count' "$report")
+          errored=$(jq '.error_count' "$report")
+          outdated=$(jq '.outdated_count' "$report")
+          if [ "$blocked" -gt 0 ] || [ "$errored" -gt 0 ]; then
+            echo "::error::committed .gitignore has a damaged managed block or an" \
+              "un-evaluable fragment (sync_blocked=$blocked, errors=$errored)." >&2
+            cat "$report" >&2
+            exit 1
+          fi
+          if [ "$outdated" -gt 0 ]; then
+            echo "::notice::cobo reports upstream drift in $outdated fragment(s);" \
+              "run 'cobo sync' to refresh the pin."
+          fi
+          rm -f "$report"
+          # On drift this also exercises the real re-render path (weave); it
+          # writes nothing and fails only if a fragment cannot re-render.
+          "${cobo[@]}" sync --dry-run

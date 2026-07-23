@@ -10,13 +10,15 @@ rev = "v6.0.0"
 hooks = [
   { id = "check-added-large-files" },
   { id = "check-toml" },
-  { id = "check-yaml", args = [
-    "--unsafe",
-  ] },
+  { id = "check-yaml", args = ["--unsafe"] },
   { id = "check-json", exclude = '^\.vscode/launch\.json$' },
   { id = "check-merge-conflict" },
   { id = "end-of-file-fixer" },
-  { id = "trailing-whitespace" },
+  # `.gitignore` is a cobo-managed block (dogfooding, see cobo.lock): its body
+  # must stay byte-identical to the upstream templates, which carry a couple of
+  # trailing spaces. Stripping them would edit the managed region and make
+  # `cobo check` report it MODIFIED, so this hook skips the file.
+  { id = "trailing-whitespace", exclude = '^\.gitignore$' },
   { id = "debug-statements" },
 ]
 

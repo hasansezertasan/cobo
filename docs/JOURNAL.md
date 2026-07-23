@@ -276,8 +276,13 @@ bug the dogfooding surfaced, exactly as #100 predicted.
 
 ### Continuous coverage
 
-Added a `dogfood` job to `ci.yml` that runs `uvx --from . cobo check` +
+Added a `dogfood` job to `ci.yml` that runs `uvx --from . cobo check --json` +
 `cobo sync --dry-run` — the same packaged-CLI invocation the composite Action uses
-(`action.yml`), without opening a PR. `check` tolerates exit 1 (upstream drift is
-actionable, not a failure) and fails only on exit ≥2, mirroring the Action's own
-`check_rc` handling; the dry-run `sync` fails only if a fragment cannot re-render.
+(`action.yml`), without opening a PR. `check` collapses three states onto exit 1:
+benign upstream drift, a locally corrupted managed block (`sync_blocked_count`), and
+un-evaluable fragments (`error_count`). The job inspects the JSON and tolerates
+*only* upstream drift — failing on `sync_blocked_count`/`error_count` — because a
+damaged committed `.gitignore` is exactly what it should catch, and a
+`sync --dry-run` alone would miss it (`run_sync` skips re-render, and thus marker
+validation, when nothing is outdated — Codex review on #105). The dry-run `sync`
+still runs afterward to exercise the re-render path on genuine drift.

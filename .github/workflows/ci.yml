@@ -116,20 +116,36 @@ jobs:
           # dump/check/sync + managed-block machinery end-to-end on a real
           # fragment, without opening a pull request.
           cobo=(uvx --from . cobo)
-          # `check` exits 1 when the upstream templates have drifted — a real,
-          # actionable state (an update is available), not a broken build — so
-          # tolerate it. Only exit >=2 (missing/invalid lockfile, config error)
-          # is a genuine failure; mirror action.yml's own check_rc handling.
+          # `check` collapses several states onto exit 1: benign upstream drift
+          # (an update is available), a locally corrupted managed block
+          # (edited body, or missing/broken markers → sync_blocked_count), and
+          # un-evaluable fragments (error_count). We must tolerate only the
+          # first — a damaged committed .gitignore is exactly what this job
+          # exists to catch, and a `sync --dry-run` alone would miss it because
+          # run_sync skips re-render (and thus marker validation) when nothing
+          # is outdated. So inspect the JSON rather than the exit code alone.
+          report="$(mktemp)"
           rc=0
-          "${cobo[@]}" check || rc=$?
+          "${cobo[@]}" check --json > "$report" || rc=$?
           if [ "$rc" -ge 2 ]; then
             echo "::error::cobo check failed against the committed cobo.lock (exit $rc)." >&2
+            cat "$report" >&2 || true
             exit "$rc"
           fi
-          if [ "$rc" -eq 1 ]; then
-            echo "::notice::cobo reports drift in .gitignore; run 'cobo sync' to refresh the pin."
+          blocked=$(jq '.sync_blocked_count' "$report")
+          errored=$(jq '.error_count' "$report")
+          outdated=$(jq '.outdated_count' "$report")
+          if [ "$blocked" -gt 0 ] || [ "$errored" -gt 0 ]; then
+            echo "::error::committed .gitignore has a damaged managed block or an" \
+              "un-evaluable fragment (sync_blocked=$blocked, errors=$errored)." >&2
+            cat "$report" >&2
+            exit 1
           fi
-          # A dry-run sync writes nothing and exits non-zero only if a fragment
-          # fails to re-render (e.g. broken managed markers) — the failure this
-          # smoke job exists to catch.
+          if [ "$outdated" -gt 0 ]; then
+            echo "::notice::cobo reports upstream drift in $outdated fragment(s);" \
+              "run 'cobo sync' to refresh the pin."
+          fi
+          rm -f "$report"
+          # On drift this also exercises the real re-render path (weave); it
+          # writes nothing and fails only if a fragment cannot re-render.
           "${cobo[@]}" sync --dry-run

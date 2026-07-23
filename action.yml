@@ -38,7 +38,7 @@ runs:
   using: composite
   steps:
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
     - name: Sync fragments
       id: sync
       shell: bash
@@ -116,7 +116,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
         rm -f "$REPORT"
     - name: Create pull request
-      uses: peter-evans/create-pull-request@v7
+      uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676  # v7
       with:
         title: ${{ inputs.pr-title }}
         labels: ${{ inputs.pr-labels }}

@@ -380,3 +380,55 @@ def test_sync_result_rejects_changed_failed_overlap() -> None:
             failed=(FailedFragment(path=".gitignore", reason="x"),),
             check=CheckResult(reports=()),
         )
+
+
+def test_check_lock_file_override_uses_given_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--lock-file points `check` at a lock outside the cwd, bypassing discovery."""
+    lock = tmp_path / "custom" / "cobo.lock"
+    lock.parent.mkdir()
+    lock.write_text(_LOCK_CONTENT, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # no discoverable cobo.lock here
+    monkeypatch.setattr(
+        cobo_globals, "run_check", MagicMock(return_value=CheckResult(reports=()))
+    )
+    result = runner.invoke(
+        app_with_globals(tmp_path), ["check", "--lock-file", str(lock)]
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_check_lock_file_missing_exits_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A --lock-file that does not exist is a clean usage error (exit 2)."""
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app_with_globals(tmp_path),
+        ["check", "--lock-file", str(tmp_path / "nope.lock")],
+    )
+    assert result.exit_code == 2, result.output  # noqa: PLR2004
+    assert "not found" in result.output.lower()
+
+
+def test_check_cobo_lock_env_var_selects_lockfile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """COBO_LOCK provides the lockfile path when --lock-file is absent."""
+    lock = tmp_path / "env.cobo.lock"
+    lock.write_text(_LOCK_CONTENT, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("COBO_LOCK", str(lock))
+    monkeypatch.setattr(
+        cobo_globals, "run_check", MagicMock(return_value=CheckResult(reports=()))
+    )
+    result = runner.invoke(app_with_globals(tmp_path), ["check"])
+    assert result.exit_code == 0, result.output

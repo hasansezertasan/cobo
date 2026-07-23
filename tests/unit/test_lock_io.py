@@ -164,3 +164,24 @@ def test_write_lock_removes_temp_on_failure(tmp_path: Path) -> None:
     with pytest.raises(OSError):  # noqa: PT011
         write_lock(target, empty_lock())
     assert not target.with_name(f"{LOCK_FILENAME}.tmp").exists()
+
+
+def test_find_lock_found_at_repo_root_from_subdir(tmp_path: Path) -> None:
+    """A cobo.lock at the repo root (.git dir) is found from a nested subdir."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / LOCK_FILENAME).write_text("version = 1\n", encoding="utf-8")
+    nested = repo / "a" / "b"
+    nested.mkdir(parents=True)
+    assert find_lock(nested) == repo / LOCK_FILENAME
+
+
+def test_find_lock_stops_at_repo_boundary(tmp_path: Path) -> None:
+    """Discovery does not ascend past the repo root into unrelated parents."""
+    # A cobo.lock ABOVE the repo boundary must not leak into the repo.
+    (tmp_path / LOCK_FILENAME).write_text("version = 1\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    nested = repo / "a" / "b"
+    nested.mkdir(parents=True)
+    assert find_lock(nested) is None

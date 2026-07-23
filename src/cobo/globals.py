@@ -154,6 +154,29 @@ def _clone_root_provider(source: Source) -> Path:
     return source_clone_root(source.name)
 
 
+def _existing_lock_or_exit(lock_file: Path | None) -> Path:
+    """Resolve the lockfile to read: an explicit override, else discovery.
+
+    Args:
+        lock_file: Path from ``--lock-file`` / ``COBO_LOCK``, or None to discover
+            the nearest cobo.lock from the cwd (bounded by the repo root).
+
+    Returns:
+        The resolved, existing lockfile path.
+
+    Raises:
+        Exit: Code 2 when the override does not exist or no cobo.lock is found.
+    """
+    lock_path = lock_file if lock_file is not None else find_lock(Path.cwd())
+    if lock_path is None or not lock_path.is_file():
+        if lock_file is not None:
+            typer.echo(f"Lockfile not found: {lock_file}", err=True)
+        else:
+            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    return lock_path
+
+
 def _load_lock_or_exit(lock_path: Path) -> Lockfile:
     """Read a lockfile, exiting cleanly (code 2) if it is malformed.
 
@@ -194,6 +217,13 @@ def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
             "--exclude",
             help="Glob pattern of fragment paths to skip. Repeatable.",
         ),
+        lock_file: Path | None = typer.Option(  # noqa: B008
+            None,
+            "--lock-file",
+            envvar="COBO_LOCK",
+            help="Path to the cobo.lock to use, overriding discovery (also read "
+            "from the COBO_LOCK env var).",
+        ),
     ) -> None:
         """Report fragments whose origin has drifted from the lockfile.
 
@@ -202,10 +232,7 @@ def _register_check(app: typer.Typer, *, config: CoboConfig) -> None:
                 when updates are available (or, with --strict, when any fragment
                 errored); code 0 when everything is up to date.
         """
-        lock_path = find_lock(Path.cwd())
-        if lock_path is None:
-            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
-            raise typer.Exit(ExitCode.USAGE)
+        lock_path = _existing_lock_or_exit(lock_file)
         result = run_check(
             _load_lock_or_exit(lock_path),
             config.sources,
@@ -294,7 +321,7 @@ def _print_check_table(result: CheckResult) -> None:
 
 def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C901
     @app.command()
-    def sync(  # noqa: C901
+    def sync(
         dry_run: bool = typer.Option(  # noqa: FBT001
             False,  # noqa: FBT003
             "--dry-run",
@@ -311,6 +338,13 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
             "--exclude",
             help="Glob pattern of fragment paths to skip. Repeatable.",
         ),
+        lock_file: Path | None = typer.Option(  # noqa: B008
+            None,
+            "--lock-file",
+            envvar="COBO_LOCK",
+            help="Path to the cobo.lock to use, overriding discovery (also read "
+            "from the COBO_LOCK env var).",
+        ),
     ) -> None:
         """Re-render outdated fragments and open them for commit.
 
@@ -320,10 +354,7 @@ def _register_sync(app: typer.Typer, *, config: CoboConfig) -> None:  # noqa: C9
                 whose managed block was edited locally, unless --force) or the
                 lockfile could not be written back; code 0 otherwise.
         """
-        lock_path = find_lock(Path.cwd())
-        if lock_path is None:
-            typer.echo("No cobo.lock found. Run `cobo <source> dump --lock`.", err=True)
-            raise typer.Exit(ExitCode.USAGE)
+        lock_path = _existing_lock_or_exit(lock_file)
         try:
             result = run_sync(
                 _load_lock_or_exit(lock_path),
@@ -356,6 +387,13 @@ def _register_lock(app: typer.Typer, *, config: CoboConfig) -> None:
         files: list[Path] = typer.Argument(  # noqa: B008
             ..., help="Previously dumped files to adopt into cobo.lock."
         ),
+        lock_file: Path | None = typer.Option(  # noqa: B008
+            None,
+            "--lock-file",
+            envvar="COBO_LOCK",
+            help="Path to the cobo.lock to write, overriding discovery (also "
+            "read from the COBO_LOCK env var).",
+        ),
     ) -> None:
         """Adopt pre-existing dumps into cobo.lock from their provenance headers.
 
@@ -368,7 +406,7 @@ def _register_lock(app: typer.Typer, *, config: CoboConfig) -> None:
                 files,
                 config.sources,
                 _clone_root_provider,
-                lock_path=resolve_lock_path(Path.cwd()),
+                lock_path=resolve_lock_path(Path.cwd(), lock_file),
             )
         except ConfigError as exc:
             typer.echo(str(exc), err=True)

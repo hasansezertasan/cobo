@@ -1306,3 +1306,29 @@ def test_check_refreshes_each_source_once(
         lock_dir=tmp_path,
     )
     assert calls == ["gi"]  # one refresh for the shared source, not one per fragment
+
+
+def test_dump_lock_file_override_writes_custom_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump --lock --lock-file PATH` records into the given lockfile, not cwd.
+
+    The lock and its output sit in the same directory so the recorded fragment
+    path stays relative (no ``..``, which the schema rejects).
+    """
+    source, clone = make_source(tmp_path, {"Python.gitignore": "*.pyc\n"})
+    clone_or_pull(source, clone)
+    monkeypatch.chdir(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    out = proj / ".gitignore"
+    custom = proj / "cobo.lock"
+    sub = build_source_subapp(source, clone_root_provider=lambda _s: clone)
+    result = runner.invoke(
+        sub,
+        ["dump", "Python", "--out", str(out), "--lock", "--lock-file", str(custom)],
+    )
+    assert result.exit_code == 0, result.output
+    assert custom.is_file()  # written at the override path
+    assert not (tmp_path / "cobo.lock").exists()  # not the default cwd location
+    assert read_lock(custom).fragments[0].path == ".gitignore"

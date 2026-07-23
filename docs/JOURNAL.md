@@ -22,6 +22,39 @@ Adopted the release pipeline from the sibling projects [olink](https://github.co
 
 ---
 
+## 2026-07-22 — Post-review: CI unblock, review fixes, bounded lock discovery
+
+### CI (prek) was red on main too
+
+The prek `ruff-check` hook installs a newer ruff than the pinned `v0.15.20`, and
+with `preview = true` + `select = ["ALL"]` its preview rules **RUF105/RUF106**
+rewrite every `# noqa:` comment into the new `# ruff:ignore[...]` syntax
+repo-wide. Opted those two rules out in `pyproject.toml` (version-tolerant: the
+pinned ruff warns "unknown selector" but passes; the newer one stops rewriting).
+Chasing the ruff version instead is a treadmill — 0.16 already adds RUF201.
+
+### CodeRabbit review
+
+Fixed: `Fragment.path`/`LockedFile.path` now reject `..`/absolute/backslash (a
+hand-edited lockfile is a `sync` write target — real traversal risk);
+`check` counts MALFORMED/MISSING blocks as sync-blocked (new `sync_blocked_count`,
+fails exit); `check` refreshes each unique source once, not per fragment; the
+Action drift report writes to a `mktemp` file outside the checkout; the composite
+Action exposes `sync-failed` as a real output. Verified three sync.py findings as
+false positives against current code.
+
+### Bounded lock discovery + override (design decision)
+
+`find_lock` walked up to the filesystem root — no boundary. Now it stops at the
+repo root (first dir with `.git`), matching cargo/uv. Added `--lock-file PATH`
+and the `COBO_LOCK` env var to override discovery on check/sync/dump/import.
+Constraint that shaped it: a fragment's `path` is relative to the lockfile's
+directory (and can't contain `..`), so the lock must live at/above its outputs —
+which is why bounding the walk beats inventing candidate directories like
+`.config/cobo.lock`.
+
+---
+
 ## 2026-07-22 — Managed-region markers to protect user edits in cobo-managed files
 
 ### Context

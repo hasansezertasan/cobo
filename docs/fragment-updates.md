@@ -65,6 +65,26 @@ Requirements and behavior:
 
 ---
 
+## Locating the lockfile
+
+`cobo.lock` lives at your project root, beside the files it tracks (a
+fragment's `path` is resolved relative to the lockfile's own directory, so the
+lock must sit at or above its outputs — it can't reach them via `..`).
+
+`check`, `sync`, `dump --lock`, and `lock import` find it by searching the
+current directory and walking **up** toward the repository root, stopping at the
+first directory that contains a `.git` entry. Discovery never escapes the repo
+into unrelated parents or `$HOME`. To point cobo at a specific lockfile
+(bypassing discovery — handy in CI or a monorepo), use `--lock-file PATH` or set
+the `COBO_LOCK` environment variable:
+
+```sh
+cobo check --lock-file path/to/cobo.lock
+COBO_LOCK=path/to/cobo.lock cobo sync
+```
+
+---
+
 ## The cobo.lock format
 
 `cobo.lock` is a TOML file, version-controlled alongside your project. It has one

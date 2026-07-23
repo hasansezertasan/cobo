@@ -111,6 +111,13 @@ def _register_dump(  # noqa: C901
             "--lock",
             help="Record this dump in cobo.lock (requires --out).",
         ),
+        lock_file: Path | None = typer.Option(  # noqa: B008
+            None,
+            "--lock-file",
+            envvar="COBO_LOCK",
+            help="Path to the cobo.lock to write, overriding discovery (also "
+            "read from the COBO_LOCK env var).",
+        ),
     ) -> None:
         """Dump boilerplate(s) to stdout or a file, optionally recording in the lock.
 
@@ -161,7 +168,7 @@ def _register_dump(  # noqa: C901
                     clone_root=target,
                     names=names,
                     out_path=out,
-                    lock_path=resolve_lock_path(Path.cwd()),
+                    lock_path=resolve_lock_path(Path.cwd(), lock_file),
                     commit_sha=commit_sha,
                 )
             except ConfigError as exc:

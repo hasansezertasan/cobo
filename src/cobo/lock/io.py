@@ -27,13 +27,22 @@ def empty_lock() -> Lockfile:
 def find_lock(start: Path) -> Path | None:
     """Search ``start`` and its ancestors for a cobo.lock file.
 
+    Ascends one directory at a time but stops at the repository root — the first
+    directory containing a ``.git`` entry — so discovery never escapes the
+    project into unrelated parent directories (or ``$HOME`` / ``/``). A cobo.lock
+    lives beside the files it tracks (its ``[[fragment]]`` paths are relative to
+    its own directory), so it always sits at or below that boundary.
+
     Returns:
-        The path to the nearest cobo.lock at or above ``start``, or None.
+        The path to the nearest cobo.lock at or above ``start`` within the
+        repository, or None.
     """
     for directory in (start, *start.parents):
         candidate = directory / LOCK_FILENAME
         if candidate.is_file():
             return candidate
+        if (directory / ".git").exists():  # repo boundary: don't ascend past it
+            break
     return None
 
 

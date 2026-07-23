@@ -85,11 +85,19 @@ def record_dump(  # noqa: PLR0913
     write_lock(lock_path, upsert_fragment(base, fragment))
 
 
-def resolve_lock_path(start: Path) -> Path:
-    """Return the lockfile path to write: an existing one upward, else here.
+def resolve_lock_path(start: Path, override: Path | None = None) -> Path:
+    """Return the lockfile path to write.
+
+    Args:
+        start: Directory to begin discovery from (usually the cwd).
+        override: An explicit path (from ``--lock-file`` / ``COBO_LOCK``) that
+            bypasses discovery entirely.
 
     Returns:
-        The nearest existing cobo.lock above ``start``, or ``start/cobo.lock``.
+        ``override`` when given; otherwise the nearest existing cobo.lock above
+        ``start`` (bounded by the repo root), or ``start/cobo.lock``.
     """
+    if override is not None:
+        return override
     found = find_lock(start)
     return found if found is not None else start / LOCK_FILENAME

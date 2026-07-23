@@ -350,6 +350,11 @@ For `multi_dump`, one such two-line header precedes each input template's block.
 The `hasansezertasan/cobo` composite Action runs `cobo sync` and opens a pull
 request when fragments drift. Add a consuming workflow to your repository:
 
+> [!NOTE]
+> Pin the Action to a released tag (e.g. `@v0.2.0`) or a commit SHA — cobo is
+> pre-1.0, so there is no moving `@v1` major tag yet; one will follow the 1.0
+> release. The examples below use `@v0.2.0`; bump it to the latest release.
+
 ```yaml
 # .github/workflows/cobo.yml
 name: cobo
@@ -365,7 +370,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hasansezertasan/cobo@v1
+      - uses: hasansezertasan/cobo@v0.2.0
         with:
           pr-title: "chore: update cobo fragments"
 ```
@@ -390,7 +395,7 @@ opened when there are no changes.
 
 ### Docker-based Action
 
-A Docker variant lives at `hasansezertasan/cobo/docker@v1`. It runs the same
+A Docker variant lives at `hasansezertasan/cobo/docker@v0.2.0`. It runs the same
 `check` + `sync` inside a container. Because a Docker action is a **single
 container**, it cannot itself open a pull request; it runs the sync and exposes
 outputs, leaving PR creation to your workflow:
@@ -405,7 +410,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: cobo
-        uses: hasansezertasan/cobo/docker@v1
+        uses: hasansezertasan/cobo/docker@v0.2.0
         with:
           exclude: |
             .github/*
@@ -427,7 +432,7 @@ jobs:
 | `sync-failed` | `"true"` when any fragment failed to re-render, else `"false"`. |
 | `summary` | A Markdown summary of the drift detected before sync (for the PR body). |
 
-The composite Action (`hasansezertasan/cobo@v1`) remains the simplest choice
+The composite Action (`hasansezertasan/cobo@v0.2.0`) remains the simplest choice
 for the full drift-to-PR flow; reach for the Docker variant only when you want
 to compose the steps yourself.
 

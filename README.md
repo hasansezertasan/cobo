@@ -188,11 +188,12 @@ Commit the updated output files and `cobo.lock` together.
 **Hold a fragment back:** set `update = false` in its `[[fragment]]` block in
 `cobo.lock`; `check` and `sync` skip it and show it as "held".
 
-**Automate with GitHub Actions:** add `hasansezertasan/cobo@v1` to a weekly
+**Automate with GitHub Actions:** add `hasansezertasan/cobo@v0.2.0` to a weekly
 workflow — it runs `cobo sync` and opens a PR when fragments drift. Requires
 `permissions: contents: write` and `pull-requests: write`. A pre-built Docker
-variant (`hasansezertasan/cobo/docker@v1`) is also available for faster
-cold-starts.
+variant (`hasansezertasan/cobo/docker@v0.2.0`) is also available for faster
+cold-starts. Pin to a released tag (or a commit SHA); a moving `@v1` major tag
+will follow the 1.0 release.
 
 See [docs/fragment-updates.md](docs/fragment-updates.md) for the full guide:
 lockfile format, exit-code tables, provenance headers, and a ready-to-paste

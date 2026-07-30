@@ -22,6 +22,40 @@ Adopted the release pipeline from the sibling projects [olink](https://github.co
 
 ---
 
+## 2026-06-23 — Re-add hatch-vcs, derive version from git tags (#45)
+
+### Context
+Reversed the "static, release-please-owned version" decision made three days
+earlier in the [2026-06-20 entry](#2026-06-20--adopt-release-please-pipeline-follow-olinkocom).
+Commit `2cb333b` (#45) re-introduced hatch-vcs so the version is derived from the
+git tag at build time rather than kept as a committed literal.
+
+### Decisions
+- **Version is dynamic again**: `pyproject.toml` `version = "0.2.0" # x-release-please-version`
+  → `dynamic = ["version"]`; `hatch-vcs` back in `build-system.requires`;
+  `[tool.hatch.version]` `source = "vcs"` with `fallback-version = "0.0.0"`,
+  `raw-options` (`version_scheme = "only-version"`, `local_scheme = "no-local-version"`),
+  and `hooks.vcs.version-file = "src/cobo/_version.py"`.
+- **`src/cobo/__init__.py`** reverted from `__version__ = "0.2.0"` to
+  `from cobo._version import __version__` — the generated `_version.py` is the
+  single source of truth, sourced from the git tag.
+- **release-please no longer touches version files**: removed the
+  `extra-files: [{ type: generic, path: pyproject.toml }]` entry from
+  `.github/release-please-config.json`. release-please now owns only the tag and
+  `CHANGELOG.md`; hatch-vcs owns the version string. (This is why the release
+  config carries `force-tag-creation: true` — the build needs the tag to exist
+  before the draft release is published; see the 2026-07-23 split entry.)
+
+### Why the reversal
+The static-literal approach required release-please to rewrite two files in
+lock-step and made the committed `0.2.0` a second source of truth that could
+drift from the tag. Deriving from the tag collapses that to one authority (the
+tag), which is also what the sibling projects settled on. This is the shape the
+[2026-07-23 release-split entry](#2026-07-23--split-release-workflow-rename-to-releaseyml)
+and the current `CONTRIBUTING.md` styleguide describe.
+
+---
+
 ## 2026-07-22 — Post-review: CI unblock, review fixes, bounded lock discovery
 
 ### CI (prek) was red on main too

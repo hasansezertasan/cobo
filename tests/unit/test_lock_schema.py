@@ -32,6 +32,24 @@ def test_fragment_can_be_pinned() -> None:
     assert frag.update is False
 
 
+def test_fragment_defaults_to_preserve_eol() -> None:
+    """A Fragment created without `eol` defaults to preserve."""
+    frag = Fragment(path=".gitignore", source="gitignore", files=(_file(),))
+    assert frag.eol == "preserve"
+
+
+def test_fragment_accepts_lf_eol() -> None:
+    """eol="lf" is a valid, recorded policy."""
+    frag = Fragment(path=".gitignore", source="gitignore", files=(_file(),), eol="lf")
+    assert frag.eol == "lf"
+
+
+def test_fragment_rejects_unknown_eol() -> None:
+    """An unrecognized eol value is rejected at construction."""
+    with pytest.raises(ValueError, match=r"Fragment\.eol"):
+        Fragment(path=".gitignore", source="gitignore", files=(_file(),), eol="crlf")
+
+
 def test_lockfile_holds_version_and_fragments() -> None:
     """Lockfile carries a schema version and a tuple of fragments."""
     frag = Fragment(path=".gitignore", source="gitignore", files=(_file(),))

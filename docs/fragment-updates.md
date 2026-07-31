@@ -36,6 +36,28 @@ to the lockfile's directory.
 
 Run the same command again after `cobo gitignore update` to refresh the pin.
 
+### Line endings (`--eol`)
+
+By default cobo seals a block's bytes verbatim, including upstream oddities such
+as the macOS `github/gitignore` `Icon` carriage-return line. Tools that enforce
+LF line endings — [copier](https://copier.readthedocs.io/)'s Jinja renderer, git
+with `text=auto eol=lf`, EditorConfig — rewrite those bytes, after which the
+block no longer matches its sealed hash and `cobo check` reports it as
+`locally modified`.
+
+Pass `--eol lf` to normalize the block to LF **before** it is sealed, so the
+on-disk bytes and the hash agree even after such a tool processes the file:
+
+```sh
+cobo gitignore dump macOS Python --out .gitignore --lock --eol lf
+```
+
+The policy is recorded on the fragment (`eol = "lf"` in `cobo.lock`), and
+`cobo sync` re-applies it, so a later sync never re-introduces a carriage return.
+A consumer that only runs `cobo check` needs no configuration: the LF seal is
+self-describing. The default, `--eol preserve`, keeps the current byte-exact
+behavior.
+
 ### Adopting pre-existing dumps
 
 If you dumped boilerplates before adopting the lockfile (or generated them on
@@ -133,6 +155,7 @@ update = false
 | `path` | fragment | Output file path, relative to the lockfile's location. |
 | `source` | fragment | The cobo source name (`gitignore`, `mise`, etc.). |
 | `update` | fragment | `true` (default) — check/sync consider this fragment. `false` — held back; check and sync skip it. |
+| `eol` | fragment | Line-ending policy the block was sealed with: `"preserve"` (default, omitted from the file) or `"lf"`. `sync` re-applies it. See [Line endings](#line-endings---eol). |
 | `[[fragment.files]]` | per input file | One block per input boilerplate that contributed to the output (multi-dump may have several). |
 | `name` | files | Boilerplate name as passed to `dump` (e.g. `"Python"`). |
 | `path` | files | Repo-relative POSIX path inside the source clone (e.g. `"Python.gitignore"`). Used to build the provenance URL. |

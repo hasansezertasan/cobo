@@ -9,6 +9,7 @@ import typer
 
 from cobo.commands.record import record_dump, resolve_lock_path
 from cobo.config.schema import Source
+from cobo.eol import Eol, normalize_eol
 from cobo.errors import ConfigError, GitError, UserError
 from cobo.exit_codes import ExitCode
 from cobo.sources import managed
@@ -118,6 +119,13 @@ def _register_dump(  # noqa: C901
             help="Path to the cobo.lock to write, overriding discovery (also "
             "read from the COBO_LOCK env var).",
         ),
+        eol: Eol = typer.Option(  # noqa: B008
+            Eol.preserve,
+            "--eol",
+            help="Line-ending policy: 'preserve' keeps upstream bytes (e.g. the "
+            "macOS Icon carriage return); 'lf' normalizes to LF before sealing "
+            "so the block survives LF-enforcing consumers (copier, git eol=lf).",
+        ),
     ) -> None:
         """Dump boilerplate(s) to stdout or a file, optionally recording in the lock.
 
@@ -140,6 +148,9 @@ def _register_dump(  # noqa: C901
         except UserError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(ExitCode.FAILURE) from exc
+        # Apply the EOL policy before sealing/writing so the on-disk bytes and
+        # the block hash agree (and a later `sync` reproduces the same bytes).
+        content = normalize_eol(content, eol.value)
         if out is None:
             typer.echo(content, nl=False)
             return
@@ -170,6 +181,7 @@ def _register_dump(  # noqa: C901
                     out_path=out,
                     lock_path=resolve_lock_path(Path.cwd(), lock_file),
                     commit_sha=commit_sha,
+                    eol=eol.value,
                 )
             except ConfigError as exc:
                 # A malformed pre-existing cobo.lock: exit 2, matching the

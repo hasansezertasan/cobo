@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from cobo.commands.check import run_check
+from cobo.eol import normalize_eol
 from cobo.errors import GitError, UserError
 from cobo.exit_codes import ExitCode
 from cobo.lock.io import write_lock
@@ -208,6 +209,9 @@ def _rerender(  # noqa: PLR0913
     commit = current_commit_sha(clone_root)
     repo_rel_paths = [f.path for f in frag.files]
     content = render_dump_locked(source, clone_root, repo_rel_paths, commit)
+    # Re-apply the fragment's sealed EOL policy so sync reproduces the exact
+    # bytes dump wrote (an "lf" fragment never has its CR re-introduced).
+    content = normalize_eol(content, frag.eol)
     target = lock_dir / frag.path
     # Decode bytes directly to preserve an embedded ``\r`` (e.g. macOS's
     # ``Icon\r``); read_text would translate it and read as a tampered block.

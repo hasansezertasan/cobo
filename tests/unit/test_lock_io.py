@@ -44,6 +44,32 @@ def test_write_then_read_roundtrips(tmp_path: Path) -> None:
     assert read_lock(target) == lock
 
 
+def test_eol_lf_roundtrips_and_is_serialized(tmp_path: Path) -> None:
+    """A fragment sealed with eol="lf" serializes the line and parses back."""
+    frag = Fragment(
+        path=".gitignore",
+        source="gitignore",
+        eol="lf",
+        files=(
+            LockedFile(
+                name="Python", path="Python.gitignore", commit="a" * 40, blob="b" * 40
+            ),
+        ),
+    )
+    target = tmp_path / LOCK_FILENAME
+    lock = Lockfile(version=1, fragments=(frag,))
+    write_lock(target, lock)
+    assert 'eol = "lf"' in target.read_text(encoding="utf-8")
+    assert read_lock(target) == lock
+
+
+def test_default_preserve_eol_is_not_serialized(tmp_path: Path) -> None:
+    """The default preserve policy emits no eol line (locks stay byte-identical)."""
+    target = tmp_path / LOCK_FILENAME
+    write_lock(target, Lockfile(version=1, fragments=(_frag(),)))
+    assert "eol" not in target.read_text(encoding="utf-8")
+
+
 def test_write_is_atomic_no_temp_left_behind(tmp_path: Path) -> None:
     """Writing leaves only cobo.lock (no stray temp files)."""
     target = tmp_path / LOCK_FILENAME

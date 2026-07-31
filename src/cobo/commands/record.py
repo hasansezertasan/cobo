@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from cobo.eol import PRESERVE
 from cobo.errors import UserError
 from cobo.lock.io import (
     LOCK_FILENAME,
@@ -32,6 +33,7 @@ def record_dump(  # noqa: PLR0913
     out_path: Path,
     lock_path: Path,
     commit_sha: CommitSha,
+    eol: str = PRESERVE,
 ) -> None:
     """Upsert a fragment for a just-written dump into the lockfile.
 
@@ -45,6 +47,8 @@ def record_dump(  # noqa: PLR0913
         out_path: The file the dump was written to.
         lock_path: Where the lockfile lives (created if absent).
         commit_sha: Full HEAD SHA of the clone at render time.
+        eol: Line-ending policy the block was sealed with, persisted so
+            ``sync`` re-applies it ("preserve" or "lf").
 
     Raises:
         UserError: When the output and the lockfile sit on different drives
@@ -81,6 +85,7 @@ def record_dump(  # noqa: PLR0913
         source=source.name,
         files=tuple(files),
         update=preserved_update,
+        eol=eol,
     )
     write_lock(lock_path, upsert_fragment(base, fragment))
 

@@ -122,7 +122,10 @@ class Fragment:
         if not self.source:
             msg = "Fragment.source must be non-empty"
             raise ValueError(msg)
-        if self.eol not in _VALID_EOL:
+        # isinstance guard first: a hand-edited lockfile may hold a non-scalar
+        # (e.g. ``eol = ["lf"]``); ``in`` on an unhashable would raise TypeError,
+        # which _parse_fragment does not translate into a clean ConfigError.
+        if not isinstance(self.eol, str) or self.eol not in _VALID_EOL:
             msg = f"Fragment.eol must be one of {sorted(_VALID_EOL)}, got {self.eol!r}"
             raise ValueError(msg)
         if not self.files:

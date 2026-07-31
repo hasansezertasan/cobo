@@ -33,7 +33,7 @@ def record_dump(  # noqa: PLR0913
     out_path: Path,
     lock_path: Path,
     commit_sha: CommitSha,
-    eol: str = PRESERVE,
+    eol: str | None = None,
 ) -> None:
     """Upsert a fragment for a just-written dump into the lockfile.
 
@@ -48,7 +48,10 @@ def record_dump(  # noqa: PLR0913
         lock_path: Where the lockfile lives (created if absent).
         commit_sha: Full HEAD SHA of the clone at render time.
         eol: Line-ending policy the block was sealed with, persisted so
-            ``sync`` re-applies it ("preserve" or "lf").
+            ``sync`` re-applies it ("preserve" or "lf"). ``None`` keeps the
+            existing fragment's policy (or "preserve" for a new fragment) — so
+            ``lock import``, which does not rewrite the file, never downgrades
+            an ``lf`` fragment, mirroring how ``update`` is preserved.
 
     Raises:
         UserError: When the output and the lockfile sit on different drives
@@ -77,15 +80,19 @@ def record_dump(  # noqa: PLR0913
         raise UserError(msg) from exc
     rel_out_posix = rel_out.replace(os.sep, "/")
     base = read_lock(lock_path) if lock_path.exists() else empty_lock()
-    preserved_update = next(
-        (f.update for f in base.fragments if f.path == rel_out_posix), True
+    existing = next((f for f in base.fragments if f.path == rel_out_posix), None)
+    preserved_update = existing.update if existing is not None else True
+    # eol=None means "don't change the policy": keep the existing fragment's
+    # (or default to preserve for a new one). An explicit value overrides.
+    effective_eol = (
+        eol if eol is not None else (existing.eol if existing is not None else PRESERVE)
     )
     fragment = Fragment(
         path=rel_out_posix,
         source=source.name,
         files=tuple(files),
         update=preserved_update,
-        eol=eol,
+        eol=effective_eol,
     )
     write_lock(lock_path, upsert_fragment(base, fragment))
 

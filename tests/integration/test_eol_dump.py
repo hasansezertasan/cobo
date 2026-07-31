@@ -15,6 +15,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from cobo.commands.lock_import import run_import
 from cobo.commands.sync import run_sync
 from cobo.config.schema import Source
 from cobo.lock.io import read_lock
@@ -156,6 +157,40 @@ def test_sync_honors_persisted_lf_and_never_reintroduces_cr(
     # The lock keeps the lf policy across the sync.
     synced = read_lock(tmp_path / "cobo.lock")
     assert synced.fragments[0].eol == "lf"
+
+
+def test_lock_import_preserves_lf_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-importing an lf-sealed fragment keeps eol="lf" (does not reset it).
+
+    ``lock import`` does not rewrite the file, so silently downgrading to
+    preserve would let the next sync re-introduce carriage returns.
+    """
+    clone = _clone_with_cr(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    dumped = runner.invoke(
+        _app(clone),
+        ["gitignore", "dump", "macOS", "--eol", "lf", "--out", str(out), "--lock"],
+    )
+    assert dumped.exit_code == 0, dumped.output
+
+    source = Source(
+        name="gitignore",
+        url="https://example.com/g.git",
+        extension=".gitignore",
+        multi_dump=True,
+        inject_header=True,
+    )
+    run_import(
+        [out],
+        {"gitignore": source},
+        clone_root_provider=lambda _s: clone,
+        lock_path=tmp_path / "cobo.lock",
+        refresh=False,
+    )
+    assert read_lock(tmp_path / "cobo.lock").fragments[0].eol == "lf"
 
 
 def test_dump_eol_lf_to_stdout_strips_cr(tmp_path: Path) -> None:

@@ -63,6 +63,26 @@ def test_eol_lf_roundtrips_and_is_serialized(tmp_path: Path) -> None:
     assert read_lock(target) == lock
 
 
+def test_read_rejects_non_scalar_eol_as_configerror(tmp_path: Path) -> None:
+    """A hand-edited non-scalar eol surfaces as ConfigError, not a raw traceback."""
+    target = tmp_path / LOCK_FILENAME
+    target.write_text(
+        "version = 1\n\n"
+        "[[fragment]]\n"
+        'path = ".gitignore"\n'
+        'source = "gitignore"\n'
+        'eol = ["lf"]\n\n'
+        "  [[fragment.files]]\n"
+        '  name = "Python"\n'
+        '  path = "Python.gitignore"\n'
+        f'  commit = "{"a" * 40}"\n'
+        f'  blob = "{"b" * 40}"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="invalid fragment"):
+        read_lock(target)
+
+
 def test_default_preserve_eol_is_not_serialized(tmp_path: Path) -> None:
     """The default preserve policy emits no eol line (locks stay byte-identical)."""
     target = tmp_path / LOCK_FILENAME

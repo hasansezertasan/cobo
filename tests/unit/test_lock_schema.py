@@ -50,6 +50,21 @@ def test_fragment_rejects_unknown_eol() -> None:
         Fragment(path=".gitignore", source="gitignore", files=(_file(),), eol="crlf")
 
 
+def test_fragment_rejects_non_scalar_eol_with_valueerror() -> None:
+    """A non-scalar eol (e.g. a hand-edited list) raises ValueError, not TypeError.
+
+    The unhashable value must not blow up the `in` membership test; it has to
+    surface as a ValueError so the lock reader maps it to a clean ConfigError.
+    """
+    with pytest.raises(ValueError, match=r"Fragment\.eol"):
+        Fragment(
+            path=".gitignore",
+            source="gitignore",
+            files=(_file(),),
+            eol=["lf"],  # type: ignore[arg-type]
+        )
+
+
 def test_lockfile_holds_version_and_fragments() -> None:
     """Lockfile carries a schema version and a tuple of fragments."""
     frag = Fragment(path=".gitignore", source="gitignore", files=(_file(),))

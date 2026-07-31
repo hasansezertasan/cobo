@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass, field
 from typing import NewType
 
+from cobo.eol import PRESERVE
+from cobo.eol import VALID as _VALID_EOL
+
 # Distinct names for the two git object kinds stored per file. They are plain
 # strings at runtime, but the aliases make a commit/blob mix-up a type error
 # rather than a silent, content-addressed bug.
@@ -94,12 +97,16 @@ class Fragment:
         source: Name of the source the inputs came from.
         files: The input files concatenated into this output, in order.
         update: When False, check/sync skip this fragment (held back).
+        eol: Line-ending policy the block was sealed with ("preserve" or "lf").
+            "lf" means the body was LF-normalized before sealing so the seal
+            survives LF-enforcing consumers; ``sync`` re-applies it.
     """
 
     path: str
     source: str
     files: tuple[LockedFile, ...]
     update: bool = True
+    eol: str = PRESERVE
 
     def __post_init__(self) -> None:
         """Reject empty path/source and fragments that track no input files.
@@ -108,11 +115,18 @@ class Fragment:
             ValueError: When ``path`` is empty/absolute/contains ``..`` (it is a
                 write target under the lockfile directory), ``source`` is empty,
                 ``files`` is empty (a fragment with no inputs would render
-                nothing), or two files share the same ``path``.
+                nothing), two files share the same ``path``, or ``eol`` is not a
+                recognized policy.
         """
         _validate_repo_rel_path(self.path, "Fragment.path")
         if not self.source:
             msg = "Fragment.source must be non-empty"
+            raise ValueError(msg)
+        # isinstance guard first: a hand-edited lockfile may hold a non-scalar
+        # (e.g. ``eol = ["lf"]``); ``in`` on an unhashable would raise TypeError,
+        # which _parse_fragment does not translate into a clean ConfigError.
+        if not isinstance(self.eol, str) or self.eol not in _VALID_EOL:
+            msg = f"Fragment.eol must be one of {sorted(_VALID_EOL)}, got {self.eol!r}"
             raise ValueError(msg)
         if not self.files:
             msg = f"Fragment {self.path!r} must track at least one file"

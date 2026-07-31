@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from cobo.commands.record import existing_fragment_eol
 from cobo.errors import ConfigError
 from cobo.lock.io import (
     LOCK_FILENAME,
@@ -42,6 +43,63 @@ def test_write_then_read_roundtrips(tmp_path: Path) -> None:
     target = tmp_path / LOCK_FILENAME
     write_lock(target, lock)
     assert read_lock(target) == lock
+
+
+def test_eol_lf_roundtrips_and_is_serialized(tmp_path: Path) -> None:
+    """A fragment sealed with eol="lf" serializes the line and parses back."""
+    frag = Fragment(
+        path=".gitignore",
+        source="gitignore",
+        eol="lf",
+        files=(
+            LockedFile(
+                name="Python", path="Python.gitignore", commit="a" * 40, blob="b" * 40
+            ),
+        ),
+    )
+    target = tmp_path / LOCK_FILENAME
+    lock = Lockfile(version=1, fragments=(frag,))
+    write_lock(target, lock)
+    assert 'eol = "lf"' in target.read_text(encoding="utf-8")
+    assert read_lock(target) == lock
+
+
+def test_read_rejects_non_scalar_eol_as_configerror(tmp_path: Path) -> None:
+    """A hand-edited non-scalar eol surfaces as ConfigError, not a raw traceback."""
+    target = tmp_path / LOCK_FILENAME
+    target.write_text(
+        "version = 1\n\n"
+        "[[fragment]]\n"
+        'path = ".gitignore"\n'
+        'source = "gitignore"\n'
+        'eol = ["lf"]\n\n'
+        "  [[fragment.files]]\n"
+        '  name = "Python"\n'
+        '  path = "Python.gitignore"\n'
+        f'  commit = "{"a" * 40}"\n'
+        f'  blob = "{"b" * 40}"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="invalid fragment"):
+        read_lock(target)
+
+
+def test_existing_fragment_eol_none_on_malformed_lock(tmp_path: Path) -> None:
+    """`existing_fragment_eol` yields None on a malformed lock (no crash).
+
+    `dump` resolves the keep-existing policy defensively; a genuinely broken
+    lock is surfaced later by `record_dump`'s own read, not here.
+    """
+    lock = tmp_path / LOCK_FILENAME
+    lock.write_text("version = = bad\n", encoding="utf-8")
+    assert existing_fragment_eol(lock, tmp_path / ".gitignore") is None
+
+
+def test_default_preserve_eol_is_not_serialized(tmp_path: Path) -> None:
+    """The default preserve policy emits no eol line (locks stay byte-identical)."""
+    target = tmp_path / LOCK_FILENAME
+    write_lock(target, Lockfile(version=1, fragments=(_frag(),)))
+    assert "eol" not in target.read_text(encoding="utf-8")
 
 
 def test_write_is_atomic_no_temp_left_behind(tmp_path: Path) -> None:

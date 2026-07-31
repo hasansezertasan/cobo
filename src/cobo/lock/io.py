@@ -5,6 +5,7 @@ from __future__ import annotations
 import tomllib
 from typing import TYPE_CHECKING, Any
 
+from cobo.eol import PRESERVE
 from cobo.errors import ConfigError
 from cobo.lock.schema import Fragment, LockedFile, Lockfile
 
@@ -100,6 +101,7 @@ def _parse_fragment(raw: dict[str, Any], path: Path) -> Fragment:
             source=raw["source"],
             files=files,
             update=raw.get("update", True),
+            eol=raw.get("eol", PRESERVE),
         )
     except KeyError as exc:
         msg = f"Lockfile {path}: fragment missing required key {exc}"
@@ -155,6 +157,10 @@ def _serialize(lock: Lockfile) -> str:
             f"source = {_q(frag.source)}",
             f"update = {str(frag.update).lower()}",
         ))
+        # Only emit ``eol`` when it deviates from the default so existing locks
+        # stay byte-identical (no spurious diff for the common preserve case).
+        if frag.eol != PRESERVE:
+            lines.append(f"eol = {_q(frag.eol)}")
         for file in frag.files:
             lines.extend((
                 "",

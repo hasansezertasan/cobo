@@ -55,8 +55,18 @@ cobo gitignore dump macOS Python --out .gitignore --lock --eol lf
 The policy is recorded on the fragment (`eol = "lf"` in `cobo.lock`), and
 `cobo sync` re-applies it, so a later sync never re-introduces a carriage return.
 A consumer that only runs `cobo check` needs no configuration: the LF seal is
-self-describing. The default, `--eol preserve`, keeps the current byte-exact
-behavior.
+self-describing.
+
+Omitting `--eol` on a **re-dump** keeps the policy the output was last sealed
+with (just as it preserves the `update` flag), so refreshing a pin with a bare
+`cobo … dump … --out … --lock` never silently reverts an `lf` fragment. Pass
+`--eol preserve` explicitly to downgrade one on purpose. A brand-new output with
+no `--eol` defaults to `preserve` (the byte-exact behavior).
+
+> `cobo lock import` cannot infer `lf`: a provenance header records no
+> line-ending policy, so an imported fragment with no prior lock entry is
+> adopted as `preserve`. If such a block must stay LF-sealed, re-dump it with
+> `--eol lf --out … --lock`.
 
 ### Adopting pre-existing dumps
 

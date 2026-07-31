@@ -30,3 +30,9 @@ def test_lf_is_idempotent_on_lf_only_text() -> None:
 def test_valid_values() -> None:
     """The recognized policy values are exactly preserve and lf."""
     assert {"preserve", "lf"} == VALID
+
+
+def test_unknown_policy_raises() -> None:
+    """An unrecognized policy fails loud rather than silently preserving."""
+    with pytest.raises(ValueError, match="unknown eol policy"):
+        normalize_eol("Icon\r\n", "crlf")

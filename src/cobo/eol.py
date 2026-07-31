@@ -40,7 +40,16 @@ def normalize_eol(text: str, eol: str) -> str:
 
     Returns:
         ``text`` unchanged for ``preserve``; the LF-normalized body for ``lf``.
+
+    Raises:
+        ValueError: When ``eol`` is not a recognized policy. Callers pass a
+            validated value (a Typer-checked ``Eol`` or a ``Fragment``-validated
+            string), so this fails loud on a programming error rather than
+            silently shipping an un-normalized block.
     """
     if eol == Eol.lf:
         return text.replace("\r\n", "\n").replace("\r", "\n")
-    return text
+    if eol == Eol.preserve:
+        return text
+    msg = f"unknown eol policy {eol!r}; expected one of {sorted(VALID)}"
+    raise ValueError(msg)

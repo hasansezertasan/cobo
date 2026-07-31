@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING
 
 from cobo.eol import PRESERVE
-from cobo.errors import UserError
+from cobo.errors import ConfigError, UserError
 from cobo.lock.io import (
     LOCK_FILENAME,
     empty_lock,
@@ -53,9 +53,9 @@ def record_dump(  # noqa: PLR0913
             ``lock import``, which does not rewrite the file, never downgrades
             an ``lf`` fragment, mirroring how ``update`` is preserved.
 
-    Raises:
-        UserError: When the output and the lockfile sit on different drives
-            (Windows), so no relative path between them exists.
+    Propagates ``UserError`` from ``_relative_output_path`` when the output and
+    the lockfile are on different drives (Windows), so no relative path links
+    them.
     """
     files: list[LockedFile] = []
     for name in names:
@@ -69,16 +69,7 @@ def record_dump(  # noqa: PLR0913
                 blob=blob_sha_for_path(clone_root, repo_rel),
             )
         )
-    try:
-        rel_out = os.path.relpath(out_path.resolve(), lock_path.parent.resolve())
-    except ValueError as exc:
-        msg = (
-            f"Cannot record '{out_path}' in {lock_path}: the output and the"
-            " lockfile are on different drives, so no relative path links them."
-            " Place cobo.lock on the same drive as the output file."
-        )
-        raise UserError(msg) from exc
-    rel_out_posix = rel_out.replace(os.sep, "/")
+    rel_out_posix = _relative_output_path(out_path, lock_path)
     base = read_lock(lock_path) if lock_path.exists() else empty_lock()
     existing = next((f for f in base.fragments if f.path == rel_out_posix), None)
     preserved_update = existing.update if existing is not None else True
@@ -95,6 +86,47 @@ def record_dump(  # noqa: PLR0913
         eol=effective_eol,
     )
     write_lock(lock_path, upsert_fragment(base, fragment))
+
+
+def _relative_output_path(out_path: Path, lock_path: Path) -> str:
+    """Return ``out_path`` as a POSIX path relative to the lockfile's directory.
+
+    Raises:
+        UserError: When the output and the lockfile sit on different drives
+            (Windows), so no relative path between them exists.
+    """
+    try:
+        rel_out = os.path.relpath(out_path.resolve(), lock_path.parent.resolve())
+    except ValueError as exc:
+        msg = (
+            f"Cannot record '{out_path}' in {lock_path}: the output and the"
+            " lockfile are on different drives, so no relative path links them."
+            " Place cobo.lock on the same drive as the output file."
+        )
+        raise UserError(msg) from exc
+    return rel_out.replace(os.sep, "/")
+
+
+def existing_fragment_eol(lock_path: Path, out_path: Path) -> str | None:
+    """Return the EOL policy already recorded for ``out_path``, or None.
+
+    Used by ``dump`` so that omitting ``--eol`` keeps the policy the fragment
+    was last sealed with (mirroring how ``update`` is preserved) rather than
+    silently resetting it to the CLI default. A missing or unreadable lock, or
+    an untracked output, yields None (the caller then defaults to preserve); a
+    genuinely malformed lock is surfaced later by ``record_dump``'s own read.
+
+    Returns:
+        The recorded ``eol`` string, or None when there is no matching fragment.
+    """
+    if not lock_path.exists():
+        return None
+    try:
+        base = read_lock(lock_path)
+        rel_out_posix = _relative_output_path(out_path, lock_path)
+    except ConfigError, UserError:
+        return None
+    return next((f.eol for f in base.fragments if f.path == rel_out_posix), None)
 
 
 def resolve_lock_path(start: Path, override: Path | None = None) -> Path:

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from cobo.commands.record import existing_fragment_eol
 from cobo.errors import ConfigError
 from cobo.lock.io import (
     LOCK_FILENAME,
@@ -81,6 +82,17 @@ def test_read_rejects_non_scalar_eol_as_configerror(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="invalid fragment"):
         read_lock(target)
+
+
+def test_existing_fragment_eol_none_on_malformed_lock(tmp_path: Path) -> None:
+    """`existing_fragment_eol` yields None on a malformed lock (no crash).
+
+    `dump` resolves the keep-existing policy defensively; a genuinely broken
+    lock is surfaced later by `record_dump`'s own read, not here.
+    """
+    lock = tmp_path / LOCK_FILENAME
+    lock.write_text("version = = bad\n", encoding="utf-8")
+    assert existing_fragment_eol(lock, tmp_path / ".gitignore") is None
 
 
 def test_default_preserve_eol_is_not_serialized(tmp_path: Path) -> None:

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/hasansezertasan/cobo/compare/v0.3.0...v0.4.0) (2026-07-31)
+
+
+### Features
+
+* add `--eol` normalization to seal LF content ([#121](https://github.com/hasansezertasan/cobo/issues/121)) ([5abadb9](https://github.com/hasansezertasan/cobo/commit/5abadb9bde1346b70b58e280066b303f9783f05a))
+
+
+### Bug Fixes
+
+* **deps:** update dependency gitpython to v3.1.56 ([#110](https://github.com/hasansezertasan/cobo/issues/110)) ([41cd7a6](https://github.com/hasansezertasan/cobo/commit/41cd7a63ea96854efc2d0251d4bbef77506e1167))
+* **deps:** update dependency gitpython to v3.1.57 ([#112](https://github.com/hasansezertasan/cobo/issues/112)) ([c311aca](https://github.com/hasansezertasan/cobo/commit/c311aca95871b1a6fba9cdac7d79438d94fa4949))
+
+
+### Documentation
+
+* correct version-ownership docs to reflect hatch-vcs ([#119](https://github.com/hasansezertasan/cobo/issues/119)) ([6dfe974](https://github.com/hasansezertasan/cobo/commit/6dfe9741bd22e7c7e02835dfa1e4699f8919c0b5))
+
 ## [0.3.0](https://github.com/hasansezertasan/cobo/compare/v0.2.0...v0.3.0) (2026-07-23)
 
 

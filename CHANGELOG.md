@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1](https://github.com/hasansezertasan/cobo/compare/v0.4.0...v0.4.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency gitpython to v3.1.58 ([#132](https://github.com/hasansezertasan/cobo/issues/132)) ([1dfc4cb](https://github.com/hasansezertasan/cobo/commit/1dfc4cb0cbcee030e69426c656bc384fc0a9728d))
+* **deps:** update dependency typer to v0.27.1 ([#127](https://github.com/hasansezertasan/cobo/issues/127)) ([133fbd9](https://github.com/hasansezertasan/cobo/commit/133fbd92d2da951b81ba8b8267f77c9af2d7381f))
+
 ## [0.4.0](https://github.com/hasansezertasan/cobo/compare/v0.3.0...v0.4.0) (2026-07-31)
 
 

@@ -4,6 +4,48 @@ Chronological record of decisions, attempts (including failures), and outcomes f
 
 ---
 
+## 2026-08-13 — Drop platformdirs for a single ~/.cobo root folder
+
+### Context
+`src/cobo/paths.py` used `platformdirs.PlatformDirs` to resolve XDG-style
+locations — cached clones under the user cache dir (`~/.cache/cobo`) and the
+config file under the user config dir (`~/.config/cobo`). Adopted the simpler
+single-root model from the sibling project
+[ocom](https://github.com/hasansezertasan/ocom/blob/main/src/ocom/core/dirs.py),
+collapsing everything into one `~/.cobo/` dotfolder and removing the
+`platformdirs` runtime dependency.
+
+### Decisions
+
+- **Single `~/.cobo` root (ocom model)**: `config.toml` and `sources/<name>`
+  now live under `~/.cobo/` instead of separate XDG cache/config dirs. The
+  public `paths.py` API (`cache_root`, `config_path`, `source_clone_root`) is
+  unchanged, so `globals.py` and `cli.py` needed no edits.
+- **Preserved implicit dir creation**: `platformdirs` was configured with
+  `ensure_exists=True`, which created the cache/config dirs on access.
+  `cache_root()` now replicates that by `mkdir(parents=True, exist_ok=True)`
+  on the root, so the single dir covers both former locations.
+- **Kept HOME handling simple**: `ROOT_FOLDER_PATH = Path.home() / ".cobo"` is
+  a module-level constant. If `HOME` is unresolvable, `Path.home()` raises
+  `RuntimeError` — same effective behavior as before. Deliberately did *not*
+  port ocom's `None` + temp-fallback + `HOME_IS_RESOLVABLE` machinery (YAGNI;
+  cobo has no startup file-logging path that needs to degrade gracefully).
+- **No code migration (pre-1.0.0)**: no `~/.config/cobo` → `~/.cobo` shim.
+  Migration guidance is surfaced to users via a release-please-native
+  `BREAKING CHANGE:` commit footer, which emits a `⚠ BREAKING CHANGES` section
+  in `CHANGELOG.md`. Cached clones re-fetch automatically on next use.
+- **Dependency + lock**: removed `"platformdirs==4.11.2"` from
+  `pyproject.toml` and re-ran `uv lock`. `platformdirs` remains in `uv.lock`
+  only as a transitive dep of the `tox`/`virtualenv` dev tooling.
+
+### Outcome
+32 unit tests pass (`test_paths.py`, `test_globals.py`,
+`test_cli_config_path.py`). The three `test_paths.py` assertions held without
+changes; only now-inaccurate docstrings referencing "user cache" / "platform's
+config directory" were updated.
+
+---
+
 ## 2026-06-20 — Adopt release-please pipeline (follow olink/ocom)
 
 ### Context

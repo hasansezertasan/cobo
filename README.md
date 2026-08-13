@@ -62,8 +62,7 @@ cobo editorconfig dump Python > .editorconfig
 
 ## Configuration
 
-A user config file at the platform-specific config path (e.g.
-`~/.config/cobo/config.toml` on Linux) can override baked sources or add
+A user config file at `~/.cobo/config.toml` can override baked sources or add
 new ones.
 
 Suppose you maintain a repo of reusable Dockerfile snippets laid out like

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/hasansezertasan/cobo/compare/v0.4.0...v0.5.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **paths:** drop platformdirs for a single ~/.cobo root folder ([#150](https://github.com/hasansezertasan/cobo/issues/150))
+
+### Bug Fixes
+
+* **deps:** update dependency gitpython to v3.1.58 ([#132](https://github.com/hasansezertasan/cobo/issues/132)) ([1dfc4cb](https://github.com/hasansezertasan/cobo/commit/1dfc4cb0cbcee030e69426c656bc384fc0a9728d))
+* **deps:** update dependency gitpython to v3.1.59 ([#142](https://github.com/hasansezertasan/cobo/issues/142)) ([e710868](https://github.com/hasansezertasan/cobo/commit/e710868f984500cb49585bc2f2bb9282796737f5))
+* **deps:** update dependency platformdirs to v4.11.1 ([#140](https://github.com/hasansezertasan/cobo/issues/140)) ([c79cae7](https://github.com/hasansezertasan/cobo/commit/c79cae7e1e5f83b35fa50fc9218b374693dfadee))
+* **deps:** update dependency platformdirs to v4.11.2 ([#143](https://github.com/hasansezertasan/cobo/issues/143)) ([fd39eea](https://github.com/hasansezertasan/cobo/commit/fd39eeaee78f3b9bdb8b9800cd8dacd44c969212))
+* **deps:** update dependency typer to v0.27.1 ([#127](https://github.com/hasansezertasan/cobo/issues/127)) ([133fbd9](https://github.com/hasansezertasan/cobo/commit/133fbd92d2da951b81ba8b8267f77c9af2d7381f))
+
+
+### Code Refactoring
+
+* **paths:** drop platformdirs for a single ~/.cobo root folder ([#150](https://github.com/hasansezertasan/cobo/issues/150)) ([a24715d](https://github.com/hasansezertasan/cobo/commit/a24715d1566cc6ff637226a72b221690726421e2))
+
 ## [0.4.0](https://github.com/hasansezertasan/cobo/compare/v0.3.0...v0.4.0) (2026-07-31)
 
 

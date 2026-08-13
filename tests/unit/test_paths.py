@@ -21,7 +21,7 @@ def test_cache_root_is_path_under_user_cache() -> None:
 
 
 def test_config_path_ends_with_config_toml() -> None:
-    """Config path ends with 'config.toml' under the platform's config directory."""
+    """Config path ends with 'config.toml' under the ~/.cobo root folder."""
     result = config_path()
     assert isinstance(result, Path)
     assert result.name == "config.toml"

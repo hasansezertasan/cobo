@@ -1,31 +1,26 @@
-"""Platform-specific path resolution for cobo."""
+"""Path resolution for cobo (single ``~/.cobo`` root folder)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
-from platformdirs import PlatformDirs
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-_DIRS: PlatformDirs = PlatformDirs(
-    appname="cobo",
-    appauthor=False,
-    version=None,
-    roaming=False,
-    ensure_exists=True,
-)
+APP_NAME = "cobo"
+"""Application name, used to derive the root folder."""
+ROOT_FOLDER_NAME = f".{APP_NAME}"
+"""Name of the root folder (``.cobo``)."""
+ROOT_FOLDER_PATH = Path.home() / ROOT_FOLDER_NAME
+"""Path to the root folder (``~/.cobo``)."""
 
 
 def cache_root() -> Path:
-    """Return the top-level cache directory for cobo."""
-    return _DIRS.user_cache_path
+    """Return the top-level ``~/.cobo`` folder, creating it if needed."""
+    ROOT_FOLDER_PATH.mkdir(parents=True, exist_ok=True)
+    return ROOT_FOLDER_PATH
 
 
 def config_path() -> Path:
     """Return the path to the user config file (existence not guaranteed)."""
-    return _DIRS.user_config_path / "config.toml"
+    return cache_root() / "config.toml"
 
 
 def source_clone_root(source_name: str) -> Path:

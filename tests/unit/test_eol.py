@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from cobo.eol import LF, PRESERVE, VALID, normalize_eol
+from cobo.sources.managed import wrap
 
 pytestmark = pytest.mark.unit
 
@@ -31,9 +32,22 @@ def test_lf_keeps_cr_inside_a_char_class() -> None:
     assert normalize_eol(body, LF) == "Icon[\r]\n.HFS+ Private Directory Data[\r]\n"
 
 
-def test_lf_keeps_lone_cr_at_end_of_text() -> None:
-    """A trailing lone CR is not followed by LF, so ``lf`` leaves it alone."""
-    assert normalize_eol("a\nIcon\r", LF) == "a\nIcon\r"
+def test_lf_treats_trailing_cr_as_a_line_end() -> None:
+    """A CR run ending the text becomes LF, so ``wrap`` cannot seal a CRLF."""
+    assert normalize_eol("a\nIcon[\r]\nx\r\r", LF) == "a\nIcon[\r]\nx\n"
+
+
+def test_lf_keeps_a_long_lone_cr_run() -> None:
+    """A long CR run inside a line is kept (and scanned in linear time)."""
+    body = "a" + "\r" * 50_000 + "b\n"
+    assert normalize_eol(body, LF) == body
+
+
+def test_lf_sealed_block_has_no_crlf() -> None:
+    """Wrapping an lf body ending in a lone CR leaves no CRLF in the file."""
+    wrapped = wrap(normalize_eol("# h\nIcon[\r]\nx\r", LF), "#")
+    assert "\r\n" not in wrapped
+    assert "Icon[\r]\n" in wrapped
 
 
 def test_lf_collapses_a_cr_run_before_lf() -> None:
@@ -44,7 +58,9 @@ def test_lf_collapses_a_cr_run_before_lf() -> None:
     assert normalize_eol("Icon\r\r\nb\n", LF) == "Icon\nb\n"
 
 
-@pytest.mark.parametrize("body", ["a\r\nb", "Icon[\r]\r\n", "x\r\r\r\ny\r", "\r\n\r\n"])
+@pytest.mark.parametrize(
+    "body", ["a\r\nb", "Icon[\r]\r\n", "x\r\r\r\ny\r", "a\r\r", "\r\n\r\n"]
+)
 def test_lf_is_idempotent_and_leaves_no_crlf(body: str) -> None:
     """Once normalized, a body has no CRLF and re-normalizing is a no-op."""
     once = normalize_eol(body, LF)

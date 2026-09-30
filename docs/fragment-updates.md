@@ -39,8 +39,8 @@ Run the same command again after `cobo gitignore update` to refresh the pin.
 ### Line endings (`--eol`)
 
 By default cobo seals a block's bytes verbatim, including any CRLF line endings
-upstream ships. Tools that enforce LF line endings — git with `text eol=lf`,
-EditorConfig — rewrite those bytes, after which the block no longer matches its
+upstream ships. Tools that enforce LF line endings, such as git with
+`text eol=lf`, rewrite those bytes, after which the block no longer matches its
 sealed hash and `cobo check` reports it as `locally modified`.
 
 Pass `--eol lf` to normalize the block to LF **before** it is sealed, so the
@@ -50,16 +50,16 @@ on-disk bytes and the hash agree even after such a tool processes the file:
 cobo gitignore dump macOS Python --out .gitignore --lock --eol lf
 ```
 
-`lf` rewrites **line terminators only**: every CR directly before an LF
-(`\r\n`, `\r\r\n`) becomes `\n`. A lone CR is left alone, the same rule git's
-`text eol=lf` and `dos2unix` follow. That CR is content, not a line ending:
+`lf` rewrites **line terminators only**: every CR run directly before an LF
+(`\r\n`, `\r\r\n`) or at the very end of the text becomes `\n`. A lone CR inside
+a line is left alone, as git's `text eol=lf` and `dos2unix` do. That CR is content, not a line ending:
 `github/gitignore`'s macOS template spells the custom-icon file `Icon\r` as the
 character class `Icon[\r]`, and turning that CR into LF would split the pattern
 into `Icon[` and `]`.
 
 > Tools that turn **every** CR into LF — copier's Jinja renderer (for
-> `.jinja` files), Prettier, pre-commit's `mixed-line-ending`, most editors on
-> save — still rewrite `Icon[\r]` and break the seal. Keep such a file out of
+> `.jinja` files), Prettier, pre-commit's `mixed-line-ending`, editors applying
+> EditorConfig's `end_of_line = lf` on save — still rewrite `Icon[\r]` and break the seal. Keep such a file out of
 > them: copy it rather than render it, exclude it from the formatter, or mark
 > it `-text` in `.gitattributes`.
 
@@ -67,6 +67,11 @@ The policy is recorded on the fragment (`eol = "lf"` in `cobo.lock`), and
 `cobo sync` re-applies it, so a later sync never re-introduces a CRLF.
 A consumer that only runs `cobo check` needs no configuration: the LF seal is
 self-describing.
+
+> cobo before 0.5.1 turned every CR into LF under `lf`, sealing
+> `Icon[\r]` as the broken `Icon[` / `]` pair. `sync` only re-renders a fragment
+> when upstream changes, so re-dump such an output to repair it now; a bare
+> `cobo … dump … --out … --lock` keeps its `lf` policy.
 
 Omitting `--eol` on a **re-dump** keeps the policy the output was last sealed
 with (just as it preserves the `update` flag), so refreshing a pin with a bare

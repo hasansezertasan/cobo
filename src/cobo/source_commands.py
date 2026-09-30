@@ -126,9 +126,10 @@ def _register_dump(  # noqa: C901
         eol: Eol | None = typer.Option(  # noqa: B008
             None,
             "--eol",
-            help="Line-ending policy: 'preserve' keeps upstream bytes (e.g. the "
-            "macOS Icon carriage return); 'lf' normalizes to LF before sealing "
-            "so the block survives LF-enforcing consumers (copier, git eol=lf). "
+            help="Line-ending policy: 'preserve' keeps upstream bytes verbatim; "
+            "'lf' turns CRLF line endings into LF before sealing so the block "
+            "survives LF-enforcing consumers (git eol=lf), keeping a lone CR "
+            "such as the macOS Icon[\\r] pattern byte. "
             "Omitted: keep the policy this output was last sealed with (like "
             "update), defaulting to 'preserve' for a new output.",
         ),

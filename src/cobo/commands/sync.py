@@ -210,7 +210,7 @@ def _rerender(  # noqa: PLR0913
     repo_rel_paths = [f.path for f in frag.files]
     content = render_dump_locked(source, clone_root, repo_rel_paths, commit)
     # Re-apply the fragment's sealed EOL policy so sync reproduces the exact
-    # bytes dump wrote (an "lf" fragment never has its CR re-introduced).
+    # bytes dump wrote (an "lf" fragment never has its CRLF re-introduced).
     content = normalize_eol(content, frag.eol)
     target = lock_dir / frag.path
     # Decode bytes directly to preserve an embedded ``\r`` (e.g. macOS's

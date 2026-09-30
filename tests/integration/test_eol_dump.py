@@ -1,9 +1,10 @@
-"""End-to-end tests for `dump --eol lf` line-ending normalization.
+r"""End-to-end tests for `dump --eol lf` line-ending normalization.
 
 These pin the fix for the LF-enforcing-consumer problem: a block sealed with
-``--eol lf`` has no carriage returns, so a downstream tool that normalizes to LF
-(copier, git ``eol=lf``) leaves the block byte-for-byte as sealed and
-``cobo check`` stays green — unlike the default ``preserve`` policy.
+``--eol lf`` has no CRLF line endings, so a downstream tool that normalizes line
+terminators to LF (git ``eol=lf``) leaves the block byte-for-byte as sealed and
+``cobo check`` stays green — unlike the default ``preserve`` policy. A lone CR
+that is pattern content (macOS ``Icon[\r]``) survives ``lf`` untouched (#124).
 """
 
 from __future__ import annotations
@@ -29,12 +30,19 @@ pytestmark = pytest.mark.integration
 
 runner = CliRunner()
 
-# macOS boilerplate carrying both a CRLF (``Icon\r\n``) and a genuine lone CR
-# (``.Trash\rSPOOL`` — a bare CR not followed by LF), the kinds of bytes upstream
-# github/gitignore ships and that LF-enforcing consumers rewrite.
-_CR_BODY = "# macOS\n.DS_Store\nIcon\r\n.Trash\rSPOOL\n"
+# macOS boilerplate carrying both a CRLF line ending (``.Trashes\r\n``) and a
+# semantic lone CR: ``Icon[\r]`` is github/gitignore's char-class matching the
+# macOS custom-icon file ``Icon\r``. ``lf`` must fix the first and keep the second.
+_CR_BODY = "# macOS\n.DS_Store\nIcon[\r]\n.Trashes\r\n"
+_ICON = b"\nIcon[\r]\n"
 # A second CR-bearing boilerplate so multi-dump and per-fragment tests are real.
 _CR_BODY2 = "# Windows\nThumbs.db\ndesktop.ini\r\n"
+
+
+def _assert_lf_sealed(raw: bytes) -> None:
+    r"""Assert ``raw`` has no CRLF yet still carries the semantic ``Icon[\r]`` CR."""
+    assert b"\r\n" not in raw
+    assert _ICON in raw
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -76,10 +84,10 @@ def _app(clone: Path) -> typer.Typer:
     return parent
 
 
-def test_dump_eol_lf_strips_cr_and_seal_matches(
+def test_dump_eol_lf_strips_crlf_and_seal_matches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`dump --eol lf` writes a CR-free block whose seal matches the LF body."""
+    """`dump --eol lf` writes a CRLF-free block whose seal matches the LF body."""
     app = _app(_clone_with_cr(tmp_path))
     monkeypatch.chdir(tmp_path)  # lock lands beside the output, like a real repo
     out = tmp_path / ".gitignore"
@@ -90,7 +98,7 @@ def test_dump_eol_lf_strips_cr_and_seal_matches(
     assert result.exit_code == 0, result.output
     # Assert on raw bytes: read_text would hide a CR via newline translation.
     raw = out.read_bytes()
-    assert b"\r" not in raw
+    _assert_lf_sealed(raw)
     # The seal agrees with the on-disk (LF) body: integrity is intact.
     assert classify(raw.decode("utf-8"), "#") is BlockState.MATCH
     # The lock records the policy so sync will re-apply it.
@@ -112,21 +120,43 @@ def test_preserve_keeps_cr_but_breaks_under_lf_normalization(
         app, ["gitignore", "dump", "macOS", "--out", str(out), "--lock"]
     )
     assert result.exit_code == 0, result.output
-    # Raw bytes: the CR the macOS trick carries is sealed verbatim.
+    # Raw bytes: the upstream CRLF is sealed verbatim.
     sealed = out.read_bytes().decode("utf-8")
-    assert "\r" in sealed
+    assert "\r\n" in sealed
     assert classify(sealed, "#") is BlockState.MATCH
-    # Simulate an LF-enforcing consumer rewriting the file.
-    stripped = sealed.replace("\r\n", "\n").replace("\r", "\n")
+    # Simulate an LF-enforcing consumer (git ``text eol=lf``) rewriting the file.
+    stripped = sealed.replace("\r\n", "\n")
     assert classify(stripped, "#") is BlockState.MODIFIED
 
 
-def test_sync_honors_persisted_lf_and_never_reintroduces_cr(
+def test_lf_block_survives_git_lf_normalization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`sync` re-applies the fragment's lf policy; the worktree CR stays stripped.
+    r"""An lf-sealed block is unchanged by a git-style CRLF->LF consumer.
 
-    The clone's boilerplate still carries the lone CR, so a naive re-render would
+    The positive counterpart of the preserve test above: the semantic
+    ``Icon[\r]`` CR is not a line terminator, so git ``text eol=lf`` keeps it
+    and the seal still matches.
+    """
+    app = _app(_clone_with_cr(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    result = runner.invoke(
+        app,
+        ["gitignore", "dump", "macOS", "--eol", "lf", "--out", str(out), "--lock"],
+    )
+    assert result.exit_code == 0, result.output
+    sealed = out.read_bytes().decode("utf-8")
+    assert sealed.replace("\r\n", "\n") == sealed
+    assert classify(sealed, "#") is BlockState.MATCH
+
+
+def test_sync_honors_persisted_lf_and_never_reintroduces_crlf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`sync` re-applies the fragment's lf policy; the worktree CRLF stays stripped.
+
+    The clone's boilerplate still carries the CRLF, so a naive re-render would
     put it back. Because the lock recorded eol="lf", sync normalizes again and
     the block stays byte-identical and intact.
     """
@@ -156,7 +186,7 @@ def test_sync_honors_persisted_lf_and_never_reintroduces_cr(
         force=True,
     )
     raw = out.read_bytes()
-    assert b"\r" not in raw
+    _assert_lf_sealed(raw)
     assert classify(raw.decode("utf-8"), "#") is BlockState.MATCH
     # The lock keeps the lf policy across the sync.
     synced = read_lock(tmp_path / "cobo.lock")
@@ -169,7 +199,7 @@ def test_lock_import_preserves_lf_policy(
     """Re-importing an lf-sealed fragment keeps eol="lf" (does not reset it).
 
     ``lock import`` does not rewrite the file, so silently downgrading to
-    preserve would let the next sync re-introduce carriage returns.
+    preserve would let the next sync re-introduce CRLF line endings.
     """
     clone = _clone_with_cr(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -197,24 +227,25 @@ def test_lock_import_preserves_lf_policy(
     assert read_lock(tmp_path / "cobo.lock").fragments[0].eol == "lf"
 
 
-def test_dump_eol_lf_to_stdout_strips_cr(tmp_path: Path) -> None:
-    """`dump --eol lf` without --out still emits LF-only content."""
+def test_dump_eol_lf_to_stdout_strips_crlf(tmp_path: Path) -> None:
+    """`dump --eol lf` without --out still emits CRLF-free content."""
     app = _app(_clone_with_cr(tmp_path))
     result = runner.invoke(app, ["gitignore", "dump", "macOS", "--eol", "lf"])
     assert result.exit_code == 0, result.output
-    assert "\r" not in result.output
+    _assert_lf_sealed(result.stdout_bytes)
 
 
-def test_dump_preserve_to_stdout_keeps_cr(tmp_path: Path) -> None:
-    r"""Negative control: `dump --eol preserve` to stdout keeps the CR.
+def test_dump_preserve_to_stdout_keeps_crlf(tmp_path: Path) -> None:
+    r"""Negative control: `dump --eol preserve` to stdout keeps the CRLF.
 
-    Proves the CliRunner output stream does not itself strip `\r`, so the
+    Proves the CliRunner stdout bytes do not themselves strip `\r\n`, so the
     lf-stdout assertion above is meaningful rather than vacuously true.
     """
     app = _app(_clone_with_cr(tmp_path))
     result = runner.invoke(app, ["gitignore", "dump", "macOS", "--eol", "preserve"])
     assert result.exit_code == 0, result.output
-    assert "\r" in result.output
+    # ``stdout_bytes``: ``Result.output`` folds CRLF to LF, hiding the CR.
+    assert b"\r\n" in result.stdout_bytes
 
 
 def test_redump_without_eol_keeps_lf_policy(
@@ -223,7 +254,7 @@ def test_redump_without_eol_keeps_lf_policy(
     """Re-dumping without --eol keeps the fragment's lf policy (no silent reset).
 
     Regression for the footgun where an omitted --eol reverted an lf fragment to
-    preserve and reintroduced the CR the policy exists to remove.
+    preserve and reintroduced the CRLF the policy exists to remove.
     """
     clone = _clone_with_cr(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -238,7 +269,7 @@ def test_redump_without_eol_keeps_lf_policy(
         app, ["gitignore", "dump", "macOS", "--out", str(out), "--lock"]
     )
     assert again.exit_code == 0, again.output
-    assert b"\r" not in out.read_bytes()
+    _assert_lf_sealed(out.read_bytes())
     assert read_lock(tmp_path / "cobo.lock").fragments[0].eol == "lf"
 
 
@@ -267,7 +298,7 @@ def test_explicit_preserve_overrides_stored_lf(
         ],
     )
     assert override.exit_code == 0, override.output
-    assert b"\r" in out.read_bytes()
+    assert b"\r\n" in out.read_bytes()
     assert read_lock(tmp_path / "cobo.lock").fragments[0].eol == "preserve"
 
 
@@ -294,7 +325,7 @@ def test_multi_boilerplate_eol_lf(
     )
     assert result.exit_code == 0, result.output
     raw = out.read_bytes()
-    assert b"\r" not in raw
+    _assert_lf_sealed(raw)
     text = raw.decode("utf-8")
     assert classify(text, "#") is BlockState.MATCH
     both_headers = 2  # one provenance header per boilerplate
@@ -363,7 +394,7 @@ def test_sync_isolates_per_fragment_eol(
         refresh=False,
         force=True,
     )
-    assert b"\r" not in a.read_bytes()  # lf fragment stays CR-free
-    assert b"\r" in b.read_bytes()  # preserve fragment keeps its CR
+    _assert_lf_sealed(a.read_bytes())  # lf fragment stays CRLF-free
+    assert b"\r\n" in b.read_bytes()  # preserve fragment keeps its CRLF
     eols = {f.path: f.eol for f in read_lock(tmp_path / "cobo.lock").fragments}
     assert eols == {"a.gitignore": "lf", "b.gitignore": "preserve"}

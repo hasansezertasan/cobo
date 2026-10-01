@@ -38,12 +38,10 @@ Run the same command again after `cobo gitignore update` to refresh the pin.
 
 ### Line endings (`--eol`)
 
-By default cobo seals a block's bytes verbatim, including upstream oddities such
-as the macOS `github/gitignore` `Icon` carriage-return line. Tools that enforce
-LF line endings — [copier](https://copier.readthedocs.io/)'s Jinja renderer, git
-with `text=auto eol=lf`, EditorConfig — rewrite those bytes, after which the
-block no longer matches its sealed hash and `cobo check` reports it as
-`locally modified`.
+By default cobo seals a block's bytes verbatim, including any CRLF line endings
+upstream ships. Tools that enforce LF line endings, such as git with
+`text eol=lf`, rewrite those bytes, after which the block no longer matches its
+sealed hash and `cobo check` reports it as `locally modified`.
 
 Pass `--eol lf` to normalize the block to LF **before** it is sealed, so the
 on-disk bytes and the hash agree even after such a tool processes the file:
@@ -52,10 +50,35 @@ on-disk bytes and the hash agree even after such a tool processes the file:
 cobo gitignore dump macOS Python --out .gitignore --lock --eol lf
 ```
 
+`lf` rewrites **line terminators only**: every CR run directly before an LF
+(`\r\n`, `\r\r\n`) or at the very end of the text becomes `\n`. A lone CR
+inside a line is left alone, as git's `text eol=lf` and `dos2unix` leave it.
+That CR is content, not a line ending: `github/gitignore`'s macOS template
+spells the custom-icon file `Icon\r` as the character class `Icon[\r]`, and
+turning that CR into LF would split the pattern into `Icon[` and `]`.
+
+Unlike git, which strips a single CR before LF, `lf` drops the whole run, so
+`Icon\r\r\n` becomes `Icon\n`. That keeps the seal free of CRLF. A source
+that still spells the icon file the legacy way, as `Icon\r\r\n`, should be
+dumped with `preserve`. A file that uses bare CRs as line endings (classic Mac)
+is not converted, because those CRs look the same as `Icon[\r]`.
+
+> Tools that turn **every** CR into LF — copier's Jinja renderer (for
+> `.jinja` files), Prettier, pre-commit's `mixed-line-ending`, editors applying
+> EditorConfig's `end_of_line = lf` on save — still rewrite `Icon[\r]` and
+> break the seal. Keep such a file out of them: copy it rather than render it
+> (no `.jinja` suffix), list it in `.prettierignore` or the hook's `exclude`,
+> or set `end_of_line = unset` for it in `.editorconfig`.
+
 The policy is recorded on the fragment (`eol = "lf"` in `cobo.lock`), and
-`cobo sync` re-applies it, so a later sync never re-introduces a carriage return.
+`cobo sync` re-applies it, so a later sync never re-introduces a CRLF.
 A consumer that only runs `cobo check` needs no configuration: the LF seal is
 self-describing.
+
+> cobo 0.5.0 and earlier turned every CR into LF under `lf`, sealing
+> `Icon[\r]` as the broken `Icon[` / `]` pair. `sync` only re-renders a fragment
+> when upstream changes, so re-dump such an output to repair it now; a bare
+> `cobo … dump … --out … --lock` keeps its `lf` policy.
 
 Omitting `--eol` on a **re-dump** keeps the policy the output was last sealed
 with (just as it preserves the `update` flag), so refreshing a pin with a bare

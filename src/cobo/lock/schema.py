@@ -98,8 +98,8 @@ class Fragment:
         files: The input files concatenated into this output, in order.
         update: When False, check/sync skip this fragment (held back).
         eol: Line-ending policy the block was sealed with ("preserve" or "lf").
-            "lf" means the body was LF-normalized before sealing so the seal
-            survives LF-enforcing consumers; ``sync`` re-applies it.
+            "lf" means CRLF line endings were normalized to LF before sealing,
+            so the seal survives git ``eol=lf``; ``sync`` re-applies it.
     """
 
     path: str

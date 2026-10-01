@@ -6,13 +6,14 @@ bytes, which then no longer match the sealed hash. Opting a dump into ``lf``
 normalizes the block body *before* it is sealed and written, so the on-disk
 bytes and the seal agree even after such a consumer processes the file.
 
-``lf`` rewrites line terminators only (``\r\n`` -> ``\n``), like git's
-``text eol=lf`` and ``dos2unix``; git's ``.gitignore`` parser likewise strips
-only a CR that directly precedes LF. A lone ``\r`` is content, not a line
-ending: in ``Icon[\r]`` it is a gitignore char-class byte, and collapsing it to
-``\n`` would split the pattern in two. Tools that turn *every* CR into LF
-(Jinja, Prettier, editors applying EditorConfig) will still rewrite such a
-byte, so a block that carries one must not be rendered or reformatted by them.
+``lf`` rewrites line terminators only (``\r\n`` -> ``\n``). Like git's
+``text eol=lf`` and ``dos2unix``, it leaves a CR inside a line alone; unlike
+them it drops a whole CR run before LF, not just one CR, so no CRLF survives.
+A lone ``\r`` is content, not a line ending: in ``Icon[\r]`` it is a gitignore
+char-class byte, and collapsing it to ``\n`` would split the pattern in two.
+Tools that turn *every* CR into LF (Jinja, Prettier, editors applying
+EditorConfig) will still rewrite such a byte, so a block that carries one must
+not be rendered or reformatted by them.
 """
 
 from __future__ import annotations

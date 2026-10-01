@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from cobo.eol import LF, PRESERVE, VALID, normalize_eol
@@ -30,6 +32,11 @@ def test_lf_keeps_cr_inside_a_char_class() -> None:
     """
     body = "Icon[\r]\r\n.HFS+ Private Directory Data[\r]\n"
     assert normalize_eol(body, LF) == "Icon[\r]\n.HFS+ Private Directory Data[\r]\n"
+
+
+def test_lf_keeps_a_stray_cr_between_ordinary_bytes() -> None:
+    """Any CR followed by a non-EOL byte is content, not just one inside ``[]``."""
+    assert normalize_eol("a\rb\n.Trash\rSPOOL\r\n", LF) == "a\rb\n.Trash\rSPOOL\n"
 
 
 def test_lf_treats_trailing_cr_as_a_line_end() -> None:
@@ -66,6 +73,18 @@ def test_lf_is_idempotent_and_leaves_no_crlf(body: str) -> None:
     once = normalize_eol(body, LF)
     assert "\r\n" not in once
     assert normalize_eol(once, LF) == once
+
+
+def test_lf_wrapped_block_never_has_crlf() -> None:
+    r"""Exhaustively, no short body seals a CRLF once normalized and wrapped.
+
+    Guards the ``\Z`` branch against changes to how ``wrap`` terminates the
+    body, which the per-case tests above would not notice.
+    """
+    for size in range(1, 7):
+        for chars in itertools.product("a \r\n", repeat=size):
+            body = normalize_eol("".join(chars), LF)
+            assert "\r\n" not in wrap(body, "#"), repr(chars)
 
 
 def test_lf_is_idempotent_on_lf_only_text() -> None:

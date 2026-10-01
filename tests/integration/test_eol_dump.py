@@ -9,6 +9,7 @@ that is pattern content (macOS ``Icon[\r]``) survives ``lf`` untouched (#124).
 
 from __future__ import annotations
 
+import os
 import subprocess  # noqa: S404
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,8 @@ from cobo.sources.managed import BlockState, classify
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from typer.testing import Result
 
 pytestmark = pytest.mark.integration
 
@@ -66,6 +69,28 @@ def _clone_with_cr(tmp_path: Path) -> Path:
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "seed")
     return repo
+
+
+def _bump_upstream(clone: Path, *names: str) -> None:
+    """Commit a new CRLF-terminated line to each boilerplate so sync re-renders.
+
+    Without an upstream change ``sync`` sees no drift and never calls
+    ``_rerender``, so the eol policy it re-applies would go untested.
+    """
+    for name in names:
+        path = clone / f"{name}.gitignore"
+        path.write_bytes(path.read_bytes() + b"bumped\r\n")
+    _git(clone, "commit", "-q", "-am", "bump")
+
+
+def _stdout_bytes(result: Result) -> bytes:
+    r"""Return CliRunner stdout with the platform newline folded back to LF.
+
+    The runner's text wrapper writes ``\n`` as ``os.linesep``, so on Windows
+    every LF reaches ``stdout_bytes`` as CRLF; undo that so only the CRs cobo
+    emitted remain.
+    """
+    return result.stdout_bytes.replace(os.linesep.encode(), b"\n")
 
 
 def _app(clone: Path) -> typer.Typer:
@@ -110,8 +135,8 @@ def test_preserve_keeps_cr_but_breaks_under_lf_normalization(
 ) -> None:
     """The default preserve policy seals the CR, so an LF consumer breaks the seal.
 
-    This is the failure the ``lf`` policy fixes: stripping the CR (what copier /
-    git eol=lf do) turns an otherwise-clean block into MODIFIED.
+    This is the failure the ``lf`` policy fixes: folding CRLF to LF (what git
+    ``eol=lf`` does) turns an otherwise-clean block into MODIFIED.
     """
     app = _app(_clone_with_cr(tmp_path))
     monkeypatch.chdir(tmp_path)  # lock lands beside the output, like a real repo
@@ -146,7 +171,9 @@ def test_lf_block_survives_git_lf_normalization(
         ["gitignore", "dump", "macOS", "--eol", "lf", "--out", str(out), "--lock"],
     )
     assert result.exit_code == 0, result.output
-    sealed = out.read_bytes().decode("utf-8")
+    raw = out.read_bytes()
+    assert _ICON in raw
+    sealed = raw.decode("utf-8")
     assert sealed.replace("\r\n", "\n") == sealed
     assert classify(sealed, "#") is BlockState.MATCH
 
@@ -168,6 +195,7 @@ def test_sync_honors_persisted_lf_and_never_reintroduces_crlf(
         ["gitignore", "dump", "macOS", "--eol", "lf", "--out", str(out), "--lock"],
     )
     assert dumped.exit_code == 0, dumped.output
+    _bump_upstream(clone, "macOS")
 
     source = Source(
         name="gitignore",
@@ -186,6 +214,7 @@ def test_sync_honors_persisted_lf_and_never_reintroduces_crlf(
         force=True,
     )
     raw = out.read_bytes()
+    assert b"\nbumped\n" in raw  # sync really re-rendered the new upstream
     _assert_lf_sealed(raw)
     assert classify(raw.decode("utf-8"), "#") is BlockState.MATCH
     # The lock keeps the lf policy across the sync.
@@ -232,7 +261,7 @@ def test_dump_eol_lf_to_stdout_strips_crlf(tmp_path: Path) -> None:
     app = _app(_clone_with_cr(tmp_path))
     result = runner.invoke(app, ["gitignore", "dump", "macOS", "--eol", "lf"])
     assert result.exit_code == 0, result.output
-    _assert_lf_sealed(result.stdout_bytes)
+    _assert_lf_sealed(_stdout_bytes(result))
 
 
 def test_dump_preserve_to_stdout_keeps_crlf(tmp_path: Path) -> None:
@@ -244,8 +273,8 @@ def test_dump_preserve_to_stdout_keeps_crlf(tmp_path: Path) -> None:
     app = _app(_clone_with_cr(tmp_path))
     result = runner.invoke(app, ["gitignore", "dump", "macOS", "--eol", "preserve"])
     assert result.exit_code == 0, result.output
-    # ``stdout_bytes``: ``Result.output`` folds CRLF to LF, hiding the CR.
-    assert b"\r\n" in result.stdout_bytes
+    # Raw bytes: ``Result.output`` folds every CRLF to LF, hiding the CR.
+    assert b"\r\n" in _stdout_bytes(result)
 
 
 def test_redump_without_eol_keeps_lf_policy(
@@ -378,6 +407,7 @@ def test_sync_isolates_per_fragment_eol(
             "--lock",
         ],
     )
+    _bump_upstream(clone, "macOS", "Windows")
     source = Source(
         name="gitignore",
         url="https://example.com/g.git",
@@ -394,6 +424,8 @@ def test_sync_isolates_per_fragment_eol(
         refresh=False,
         force=True,
     )
+    assert b"\nbumped\n" in a.read_bytes()  # both fragments were re-rendered
+    assert b"\nbumped\r\n" in b.read_bytes()
     _assert_lf_sealed(a.read_bytes())  # lf fragment stays CRLF-free
     assert b"\r\n" in b.read_bytes()  # preserve fragment keeps its CRLF
     eols = {f.path: f.eol for f in read_lock(tmp_path / "cobo.lock").fragments}

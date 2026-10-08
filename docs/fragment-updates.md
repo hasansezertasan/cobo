@@ -433,7 +433,23 @@ jobs:
 
 The `actions/checkout` step must come before the cobo action. The workflow needs
 `contents: write` (to push the update branch) and `pull-requests: write` (to open
-the PR).
+the PR), and the repository must allow it: enable **Settings → Actions → General
+→ Allow GitHub Actions to create and approve pull requests**.
+
+By default the PR is opened with the workflow's `GITHUB_TOKEN`. GitHub holds the
+`pull_request` workflow runs it triggers in an approval-required state: the PR's
+checks start only after a user with write access approves them, and
+`push`-triggered workflows on the update branch do not run at all. To have the
+checks start on their own, pass a fine-grained personal access token or a GitHub
+App token through `token`. The workflow's `permissions:` block applies only to
+`GITHUB_TOKEN`, so the override token needs its own **Contents: write** and
+**Pull requests: write** access to the repository.
+
+```yaml
+      - uses: hasansezertasan/cobo@v0.2.0
+        with:
+          token: ${{ secrets.COBO_TOKEN }}
+```
 
 ### Action inputs
 
@@ -444,6 +460,7 @@ the PR).
 | `pr-title` | `"chore: update cobo fragments"` | Title for the opened pull request. |
 | `pr-labels` | `"cobo"` | Comma-separated labels for the pull request. |
 | `branch` | `"cobo/update-fragments"` | Branch the action pushes updates to. |
+| `token` | _(empty)_ | Token used to push the branch and open the PR. Defaults to `GITHUB_TOKEN`, whose PR checks wait for approval; pass a PAT or GitHub App token with Contents and Pull requests write access so they start on their own. |
 | `fail-on-sync-error` | `"false"` | When `"true"`, fail the run if any fragment failed to re-render. The PR for the fragments that did succeed is still opened first; the run fails afterward. The default isolates failures and stays green, surfacing them only in the PR body and the `sync_failed` output. |
 
 The action uses `peter-evans/create-pull-request` under the hood, so no PR is

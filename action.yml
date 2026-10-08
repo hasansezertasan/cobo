@@ -27,7 +27,7 @@ inputs:
     default: cobo/update-fragments
   token:
     description: >-
-      Token used to push the update branch and open the pull request. Defaults to the workflow's GITHUB_TOKEN, but pull requests opened with that token do not trigger other workflows, so the PR's checks never run. Pass a personal access token or GitHub App token to have them run.
+      Token used to push the update branch and open the pull request. Defaults to the workflow's GITHUB_TOKEN; with that token, the PR's pull_request checks wait for a user with write access to approve them, and push-triggered workflows do not run at all. Pass a personal access token or GitHub App token with contents and pull-requests write access to have the checks start on their own.
     required: false
     default: ""
   fail-on-sync-error:

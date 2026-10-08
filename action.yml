@@ -25,6 +25,11 @@ inputs:
     description: Branch the action pushes updates to.
     required: false
     default: cobo/update-fragments
+  token:
+    description: >-
+      Token used to push the update branch and open the pull request. Defaults to the workflow's GITHUB_TOKEN, but pull requests opened with that token do not trigger other workflows, so the PR's checks never run. Pass a personal access token or GitHub App token to have them run.
+    required: false
+    default: ""
   fail-on-sync-error:
     description: >-
       When "true", fail the workflow run if any fragment failed to re-render. The PR for the fragments that did succeed is still opened first; the run fails afterward. Defaults to "false" (isolate failures and stay green, surfacing them only in the PR body and the sync_failed output).
@@ -118,6 +123,7 @@ runs:
     - name: Create pull request
       uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8
       with:
+        token: ${{ inputs.token || github.token }}
         title: ${{ inputs.pr-title }}
         labels: ${{ inputs.pr-labels }}
         branch: ${{ inputs.branch }}

@@ -13,6 +13,7 @@ import os
 import subprocess  # noqa: S404
 from typing import TYPE_CHECKING
 
+import jinja2
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -178,6 +179,60 @@ def test_lf_block_survives_git_lf_normalization(
     assert classify(sealed, "#") is BlockState.MATCH
 
 
+def _jinja_render(raw: bytes) -> str:
+    """Render sealed bytes as a Copier template would (a lone CR becomes LF).
+
+    Returns:
+        The rendered text, with trailing newlines kept so the seal marker holds.
+    """
+    env = jinja2.Environment(keep_trailing_newline=True, autoescape=False)  # noqa: S701
+    return env.from_string(raw.decode("utf-8")).render()
+
+
+def test_lf_block_is_modified_after_jinja_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r"""Control: Jinja rewrites the kept ``Icon[\r]``, breaking ``lf`` seals (#243)."""
+    app = _app(_clone_with_cr(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    result = runner.invoke(
+        app,
+        ["gitignore", "dump", "macOS", "--eol", "lf", "--out", str(out), "--lock"],
+    )
+    assert result.exit_code == 0, result.output
+    rendered = _jinja_render(out.read_bytes())
+    assert classify(rendered, "#") is BlockState.MODIFIED
+
+
+def test_lf_strict_block_survives_jinja_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ``lf-strict`` seal has no lone CR, so a Jinja render stays MATCH (#243)."""
+    app = _app(_clone_with_cr(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    result = runner.invoke(
+        app,
+        [
+            "gitignore",
+            "dump",
+            "macOS",
+            "--eol",
+            "lf-strict",
+            "--out",
+            str(out),
+            "--lock",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    raw = out.read_bytes()
+    assert b"\r" not in raw
+    assert _jinja_render(raw).encode("utf-8") == raw
+    assert classify(_jinja_render(raw), "#") is BlockState.MATCH
+    assert 'eol = "lf-strict"' in (tmp_path / "cobo.lock").read_text(encoding="utf-8")
+
+
 def test_sync_honors_persisted_lf_and_never_reintroduces_crlf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -220,6 +275,56 @@ def test_sync_honors_persisted_lf_and_never_reintroduces_crlf(
     # The lock keeps the lf policy across the sync.
     synced = read_lock(tmp_path / "cobo.lock")
     assert synced.fragments[0].eol == "lf"
+
+
+def test_sync_honors_persisted_lf_strict_and_keeps_it_jinja_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r"""`sync` re-applies `lf-strict`, so the re-rendered block still has no lone CR.
+
+    The clone's boilerplate still carries ``Icon[\\r]``; a sync that fell back to
+    `lf` or `preserve` would put it back and break the Jinja-render guarantee.
+    """
+    clone = _clone_with_cr(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / ".gitignore"
+    dumped = runner.invoke(
+        _app(clone),
+        [
+            "gitignore",
+            "dump",
+            "macOS",
+            "--eol",
+            "lf-strict",
+            "--out",
+            str(out),
+            "--lock",
+        ],
+    )
+    assert dumped.exit_code == 0, dumped.output
+    _bump_upstream(clone, "macOS")
+
+    source = Source(
+        name="gitignore",
+        url="https://example.com/g.git",
+        extension=".gitignore",
+        multi_dump=True,
+        inject_header=True,
+    )
+    run_sync(
+        read_lock(tmp_path / "cobo.lock"),
+        {"gitignore": source},
+        clone_root_provider=lambda _s: clone,
+        lock_dir=tmp_path,
+        lock_path=tmp_path / "cobo.lock",
+        refresh=False,
+        force=True,
+    )
+    raw = out.read_bytes()
+    assert b"\nbumped\n" in raw  # sync really re-rendered the new upstream
+    assert b"\r" not in raw
+    assert classify(_jinja_render(raw), "#") is BlockState.MATCH
+    assert read_lock(tmp_path / "cobo.lock").fragments[0].eol == "lf-strict"
 
 
 def test_lock_import_preserves_lf_policy(

@@ -6,7 +6,7 @@ import itertools
 
 import pytest
 
-from cobo.eol import LF, PRESERVE, VALID, normalize_eol
+from cobo.eol import LF, LF_STRICT, PRESERVE, VALID, normalize_eol
 from cobo.sources.managed import wrap
 
 pytestmark = pytest.mark.unit
@@ -93,9 +93,19 @@ def test_lf_is_idempotent_on_lf_only_text() -> None:
     assert normalize_eol(body, LF) == body
 
 
+def test_lf_strict_removes_lone_crs_and_normalizes_terminators() -> None:
+    r"""``lf-strict`` drops a lone CR (``Icon[\r]`` -> ``Icon[]``) and CR+LF ends.
+
+    Jinja turns a lone CR into LF, so a seal that carries one cannot survive a
+    Copier render; stripping it at seal time leaves nothing to rewrite.
+    """
+    body = "a\r\nIcon[\r]\r\nb\rc\n"
+    assert normalize_eol(body, LF_STRICT) == "a\nIcon[]\nbc\n"
+
+
 def test_valid_values() -> None:
-    """The recognized policy values are exactly preserve and lf."""
-    assert {"preserve", "lf"} == VALID
+    """The recognized policy values are exactly preserve, lf and lf-strict."""
+    assert {"preserve", "lf", "lf-strict"} == VALID
 
 
 def test_unknown_policy_raises() -> None:

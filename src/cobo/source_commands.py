@@ -129,7 +129,8 @@ def _register_dump(  # noqa: C901
             help="Line-ending policy: 'preserve' keeps upstream bytes verbatim; "
             "'lf' turns CRLF line endings into LF before sealing so the block "
             "survives LF-enforcing consumers (git eol=lf), keeping a lone CR "
-            "such as the macOS Icon[\\r] pattern byte. "
+            "such as the macOS Icon[\\r] pattern byte; 'lf-strict' also removes "
+            "lone CRs so the block survives CR-to-LF renderers such as Jinja. "
             "Omitted: keep the policy this output was last sealed with (like "
             "update), defaulting to 'preserve' for a new output.",
         ),

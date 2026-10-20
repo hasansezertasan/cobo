@@ -66,11 +66,20 @@ is not converted, because those CRs look the same as `Icon[\r]`.
 > Tools that turn **every** CR into LF — copier's Jinja renderer (for
 > `.jinja` files), Prettier, pre-commit's `mixed-line-ending`, editors applying
 > EditorConfig's `end_of_line = lf` on save — still rewrite `Icon[\r]` and
-> break the seal. Keep such a file out of them: copy it rather than render it
-> (no `.jinja` suffix), list it in `.prettierignore` or the hook's `exclude`,
-> or set `end_of_line = unset` for it in `.editorconfig`.
+> break the seal. Either keep such a file out of them (copy it rather than
+> render it, list it in `.prettierignore` or the hook's `exclude`, or set
+> `end_of_line = unset` for it in `.editorconfig`), or seal it with
+> `--eol lf-strict`.
 
-The policy is recorded on the fragment (`eol = "lf"` in `cobo.lock`), and
+`lf-strict` does everything `lf` does and then **removes** every remaining lone
+CR, so `Icon[\r]` becomes `Icon[]`. The seal then holds nothing a CR-to-LF
+renderer can rewrite, and a Jinja-rendered copy still verifies. The cost is that
+the macOS `Icon[\r]` pattern no longer matches the `Icon\r` file. A rendered
+file that was sealed with `lf` stays `locally modified` until it is re-dumped
+with `--eol lf-strict`; `cobo check` does not migrate it.
+
+The policy is recorded on the fragment (`eol = "lf"` or `"lf-strict"` in
+`cobo.lock`), and
 `cobo sync` re-applies it, so a later sync never re-introduces a CRLF.
 A consumer that only runs `cobo check` needs no configuration: the LF seal is
 self-describing.
@@ -78,7 +87,8 @@ self-describing.
 > cobo 0.5.0 and earlier turned every CR into LF under `lf`, sealing
 > `Icon[\r]` as the broken `Icon[` / `]` pair. `sync` only re-renders a fragment
 > when upstream changes, so re-dump such an output to repair it now; a bare
-> `cobo … dump … --out … --lock` keeps its `lf` policy.
+> `cobo … dump … --out … --lock` keeps its `lf` policy. A file that is
+> rendered through Jinja should be re-dumped with `--eol lf-strict` instead.
 
 Omitting `--eol` on a **re-dump** keeps the policy the output was last sealed
 with (just as it preserves the `update` flag), so refreshing a pin with a bare
@@ -89,7 +99,7 @@ no `--eol` defaults to `preserve` (the byte-exact behavior).
 > `cobo lock import` cannot infer `lf`: a provenance header records no
 > line-ending policy, so an imported fragment with no prior lock entry is
 > adopted as `preserve`. If such a block must stay LF-sealed, re-dump it with
-> `--eol lf --out … --lock`.
+> `--eol lf --out … --lock` (or `--eol lf-strict` if it will be Jinja-rendered).
 
 ### Adopting pre-existing dumps
 
@@ -188,7 +198,7 @@ update = false
 | `path` | fragment | Output file path, relative to the lockfile's location. |
 | `source` | fragment | The cobo source name (`gitignore`, `mise`, etc.). |
 | `update` | fragment | `true` (default) — check/sync consider this fragment. `false` — held back; check and sync skip it. |
-| `eol` | fragment | Line-ending policy the block was sealed with: `"preserve"` (default, omitted from the file) or `"lf"`. `sync` re-applies it. See [Line endings](#line-endings---eol). |
+| `eol` | fragment | Line-ending policy the block was sealed with: `"preserve"` (default, omitted from the file), `"lf"` or `"lf-strict"`. `sync` re-applies it. See [Line endings](#line-endings---eol). |
 | `[[fragment.files]]` | per input file | One block per input boilerplate that contributed to the output (multi-dump may have several). |
 | `name` | files | Boilerplate name as passed to `dump` (e.g. `"Python"`). |
 | `path` | files | Repo-relative POSIX path inside the source clone (e.g. `"Python.gitignore"`). Used to build the provenance URL. |

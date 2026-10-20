@@ -13,7 +13,8 @@ A lone ``\r`` is content, not a line ending: in ``Icon[\r]`` it is a gitignore
 char-class byte, and collapsing it to ``\n`` would split the pattern in two.
 Tools that turn *every* CR into LF (Jinja, Prettier, editors applying
 EditorConfig) will still rewrite such a byte, so a block that carries one must
-not be rendered or reformatted by them.
+not be rendered or reformatted by them, or be sealed ``lf-strict``, which also
+removes every lone CR so there is nothing left for them to rewrite.
 """
 
 from __future__ import annotations
@@ -31,11 +32,13 @@ class Eol(StrEnum):
 
     preserve = "preserve"
     lf = "lf"
+    lf_strict = "lf-strict"
 
 
 # Plain-string aliases for the values stored in cobo.lock and passed around.
 PRESERVE = Eol.preserve.value
 LF = Eol.lf.value
+LF_STRICT = Eol.lf_strict.value
 VALID = frozenset(e.value for e in Eol)
 
 # A line terminator: LF plus any CRs directly before it, or a CR run ending the
@@ -56,7 +59,8 @@ def normalize_eol(text: str, eol: str) -> str:
         eol: ``"preserve"`` to leave bytes untouched, or ``"lf"`` to turn
             every CR run that ends a line (``\r\n``, ``\r\r\n``, or a
             trailing ``\r``) into ``\n``. A lone ``\r`` inside a line is kept
-            (see module docstring).
+            (see module docstring). ``"lf-strict"`` removes every ``\r``,
+            terminators and lone ones alike.
 
     Returns:
         ``text`` unchanged for ``preserve``; the LF-normalized body for ``lf``.
@@ -69,6 +73,8 @@ def normalize_eol(text: str, eol: str) -> str:
     """
     if eol == Eol.lf:
         return _LINE_END.sub("\n", text)
+    if eol == Eol.lf_strict:
+        return text.replace("\r", "")
     if eol == Eol.preserve:
         return text
     msg = f"unknown eol policy {eol!r}; expected one of {sorted(VALID)}"

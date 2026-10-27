@@ -31,8 +31,10 @@ The `.gitignore` managed block must stay byte-identical to the upstream template
 **Evidence:** confirmed
 **Source:** maintainer's development journal (`docs/JOURNAL.md`, 2026-07-22 post-review entry); comment in `pyproject.toml`
 **Verification:** corroborated
-**Revisit when:** ruff's preview rules stabilize or the pinned version catches up
+**Revisit when:** RUF105 and RUF106 stabilize, or the project decides to adopt the `# ruff:ignore[...]` syntax
 
-prek installs a newer ruff than the pinned one, and with `preview = true` and `select = ["ALL"]` these two rules rewrite every `# noqa:` comment into the new syntax repo-wide. Opting them out works on both versions (the pinned one only warns "unknown selector").
+With `preview = true` and `select = ["ALL"]`, these two preview rules rewrite every `# noqa: CODE` comment into the newer `# ruff:ignore[rule-name]` syntax repo-wide. They stay opted out in `pyproject.toml` until that syntax stabilizes, rather than churning every suppression across the codebase.
 
-**Rejected alternative:** chasing the ruff version, which the journal calls a treadmill (0.16 already adds RUF201).
+**History:** when this was introduced (2026-07-22) the prek ruff hook ran a newer version than the pinned one, and the opt-out was also what kept both versions consistent. The pin has since moved to a ruff that knows these rules, so that compatibility reason no longer applies; the preview-churn reason above is the current one.
+
+**Rejected alternative:** chasing the ruff version, which the journal calls a treadmill.

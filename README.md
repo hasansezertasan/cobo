@@ -5,6 +5,7 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/cobo.svg)](https://pypi.org/project/cobo)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/cobo.svg)](https://pypi.org/project/cobo)
 [![License - MIT](https://img.shields.io/github/license/hasansezertasan/cobo.svg)](https://opensource.org/licenses/MIT)
+[![Keep the Why · live](https://hasansezertasan.github.io/cobo/dashboard/live/badge-entries.svg)](https://hasansezertasan.github.io/cobo/dashboard/live/)
 
 `cobo` (short for **copy boilerplates**) is a command-line tool for fetching boilerplate files from configurable git repositories. It ships with five sources baked in:
 

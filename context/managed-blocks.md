@@ -10,7 +10,7 @@
 **Verification:** corroborated
 **Revisit when:** a second managed block per file is needed (format v2), or the marker format changes. The markers live in users' files, so the format is a contract.
 
-`cobo sync` regenerates only the block between `cobo:begin` and `cobo:end sha256=<hash>` markers and preserves everything outside verbatim. A plain `dump --out` stays marker-free; markers come from `dump --lock` and from `sync`, which also creates them when a tracked output is absent and, with `--force`, rebuilds a file whose markers are unusable. If markers are missing or duplicated, or the block no longer matches its hash, `sync` refuses (`--force` overrides) and `check` reports it as locally modified.
+`cobo sync` regenerates only the block between `cobo:begin` and `cobo:end sha256=<hash>` markers and preserves everything outside verbatim, as long as the existing markers parse. If they are missing, duplicated or malformed, or the block no longer matches its hash, `sync` refuses and `check` reports it as locally modified. `--force` overrides, but a rebuild over unusable markers starts from scratch and discards all previous content, including anything kept outside the old block. A plain `dump --out` stays marker-free; markers come from `dump --lock` and from `sync`, which also creates them when a tracked output is absent.
 
 **Reason:** the lockfile tracks upstream input provenance, not output integrity. Before the markers, `sync` fully overwrote the output, so a hand-edited tail was silently destroyed whenever upstream drifted. Found while dogfooding cobo on its own `.gitignore`.
 

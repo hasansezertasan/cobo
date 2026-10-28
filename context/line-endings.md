@@ -10,7 +10,7 @@
 **Verification:** corroborated
 **Revisit when:** the `--eol` option is removed or its default changes
 
-cobo seals a managed block's bytes verbatim, including upstream CRs such as the macOS `Icon[\r]` line. Consumers that enforce LF (copier's Jinja renderer, git `eol=lf`, EditorConfig) rewrite those bytes, and the block then no longer matches its sealed hash, so `cobo check` reports it as locally modified permanently. `--eol lf` normalizes line terminators (`\r\n`, a CR run before LF, a trailing CR) before sealing so the seal survives such consumers. `preserve` stays the default and the choice is recorded on the lock fragment.
+cobo seals a managed block's bytes verbatim, including upstream CRs such as the macOS `Icon[\r]` line. Consumers that rewrite line endings (git `eol=lf`, copier's Jinja renderer, EditorConfig) change those bytes, and the block then no longer matches its sealed hash, so `cobo check` reports it as locally modified permanently. `--eol lf` normalizes line terminators (`\r\n`, a CR run before LF, a trailing CR) before sealing, so the seal survives consumers that only normalize line terminators, such as git `eol=lf`. It does not survive tools that turn every CR into LF (Jinja, Prettier, EditorConfig), because `lf` deliberately keeps a lone CR inside a line and those tools rewrite it. `preserve` stays the default and the choice is recorded on the lock fragment.
 
 **Reason for `lf` keeping lone CRs:** in `Icon[\r]` the CR is a gitignore character-class byte, not a line ending. The first version turned every CR into LF, which split the pattern into `Icon[` and `]` and stopped the macOS icon file being ignored (#124, fixed in #226).
 

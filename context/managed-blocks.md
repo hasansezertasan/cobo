@@ -45,7 +45,7 @@
 **Verification:** corroborated
 **Revisit when:** a consumer that cannot avoid rendering the sealed file needs a render-safe seal, or a third `eol` policy beyond `preserve` and `lf` is proposed
 
-cobo seals the bytes the source ships. The `eol` policies stay `preserve` and `lf`, and `lf` keeps a lone CR inside a line (`Icon[\r]`). cobo does not strip, convert or tolerate lone CRs for the sake of a downstream renderer.
+`preserve` seals the bytes the source ships unchanged. `lf` normalizes CR runs at line endings before cobo seals and writes the body, but keeps a lone CR inside a line (`Icon[\r]`). The `eol` policies stay `preserve` and `lf`, and cobo does not strip or tolerate lone CRs for the sake of a downstream renderer.
 
 **Reason:** a lone CR in macOS's `Icon[\r]` is gitignore content, the char-class that matches the `Icon\r` file. Jinja turns a lone CR into LF, so a sealed file run through it reads as locally modified forever and its pattern is split into `Icon[` and `]`. The cause is the renderer touching bytes of a file that does not need to be a template, so the fix belongs with the consumer (see [copier-integration.md](copier-integration.md)).
 

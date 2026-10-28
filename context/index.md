@@ -26,6 +26,8 @@
 
 ## C
 
+- [copier-integration.md](copier-integration.md) — how cobo output reaches Copier projects and who owns it afterwards
+
 ## D
 
 ## E
@@ -46,7 +48,7 @@
 
 ## M
 
-- [managed-blocks.md](managed-blocks.md) — managed-region markers and lock discovery for cobo-managed files
+- [managed-blocks.md](managed-blocks.md) — managed-region markers, lock discovery, and the rule that seals are not rewritten for renderers
 
 ## N
 

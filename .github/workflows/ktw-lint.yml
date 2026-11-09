@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: oliver-zehentleitner/keep-the-why@2771046616a3c6bcd62916ed072f71feb5afd222  # lint-latest
+      - uses: oliver-zehentleitner/keep-the-why@1af21fcc16a52e2971083ffb96d92b0f1f008399  # lint-latest
         with:
           path: "."
           strict: "false"  # "true" turns warnings (e.g. missing Type on old entries) into failures

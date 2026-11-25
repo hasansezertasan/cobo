@@ -22,6 +22,8 @@
 
 ## A
 
+- [actions.md](actions.md) — the composite and Docker GitHub Action flavours
+
 ## B
 
 ## C
@@ -46,6 +48,9 @@
 
 ## L
 
+- [line-endings.md](line-endings.md) — why --eol exists, why preserve is the default, and why lf keeps lone CRs
+- [lockfile.md](lockfile.md) — why cobo.lock is the source of truth and drift is keyed on blob SHAs
+
 ## M
 
 - [managed-blocks.md](managed-blocks.md) — managed-region markers, lock discovery, and the rule that seals are not rewritten for renderers
@@ -65,6 +70,8 @@
 - [releases.md](releases.md) — release versioning, workflow shape, the PyPI publishing constraint
 
 ## S
+
+- [scope.md](scope.md) — what cobo is for and why micoo was left alone
 
 ## T
 
